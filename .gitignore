@@ -1,0 +1,10 @@
+# Ignorer les fichiers de configuration de l'environnement virtuel Python
+venv/
+
+# Ignorer les fichiers de sauvegarde de l'éditeur de code
+*.bak
+
+# Ignorer les fichiers de cache
+.cache/
+git add .gitignore
+git commit -m "Ajout du fichier .gitignore"
