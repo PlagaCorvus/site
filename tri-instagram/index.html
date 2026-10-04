@@ -235,6 +235,11 @@ textarea.out{
   opacity:0;pointer-events:none;transition:opacity .2s,bottom .2s
 }
 .toast.show{opacity:1;bottom:94px}
+.rep-t{width:100%;border-collapse:collapse;font-size:13px}
+.rep-t th{text-align:left;color:var(--txt-2);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line);font-size:12px}
+.rep-t td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top;word-break:break-all}
+.rep-t td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.rep-ok{color:var(--keep)}.rep-no{color:var(--txt-2)}.rep-err{color:var(--drop)}
 .stat-row{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:16px}
 .stat{background:var(--bg-2);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
 .stat b{display:block;font-size:22px;font-variant-numeric:tabular-nums;line-height:1.2}
@@ -262,6 +267,7 @@ ul.plain li{margin-bottom:6px}
   <div class="wrap topbar-in">
     <div class="brand"><span class="dot"></span><span>Tri Instagram<small>Tout se passe sur votre appareil</small></span></div>
     <div class="spacer"></div>
+    <button class="btn sm ghost hidden" id="btn-report">Rapport</button>
     <button class="btn sm ghost" id="btn-help">Aide</button>
     <button class="btn sm ghost hidden" id="btn-reset">Recharger</button>
     <button class="btn sm primary hidden" id="btn-export">Exporter</button>
@@ -400,6 +406,16 @@ ul.plain li{margin-bottom:6px}
   </div>
 </dialog>
 
+<dialog id="dlg-report">
+  <div class="dlg-head"><h3>Rapport d'import</h3><div class="spacer"></div>
+    <button class="btn sm ghost" onclick="document.getElementById('dlg-report').close()">✕</button></div>
+  <div class="dlg-body" id="report-body"></div>
+  <div class="dlg-foot">
+    <button class="btn" id="report-copy">Copier le rapport</button>
+    <button class="btn primary" onclick="document.getElementById('dlg-report').close()">Fermer</button>
+  </div>
+</dialog>
+
 <dialog id="dlg-prev">
   <div class="dlg-head"><h3>Activer les aperçus Instagram</h3><div class="spacer"></div>
     <button class="btn sm ghost" onclick="document.getElementById('dlg-prev').close()">✕</button></div>
@@ -497,6 +513,7 @@ const IMAGE_EXT = /\.(jpe?g|png|webp|gif|heic|avif)$/i;
 
 const S = {
   items: [],
+  report: [],
   tab: null,
   q: '',
   sort: 'date-desc',
@@ -713,6 +730,32 @@ function parseSaved(entries) {
   return out;
 }
 
+/* Les collections d'enregistrements. Selon les versions de l'export, une
+   entrée est soit une collection, soit une publication rangée dedans. */
+function parseSavedCollections(entries) {
+  const out = [];
+  for (const e of entries) {
+    const map = e.string_map_data || {};
+    const list = Array.isArray(e.string_list_data) ? e.string_list_data : [];
+    const collection = fixText((map.Name && map.Name.value) || e.title || '');
+    const candidates = list.length ? list : Object.values(map);
+    for (const d of candidates) {
+      const href = d && d.href;
+      if (!href || !/\/(p|reel|reels|tv)\//.test(href)) continue;
+      out.push({
+        type: 'saved',
+        title: collection || fixText(d.value || ''),
+        user: fixText(d.value || ''),
+        href,
+        ts: d.timestamp || 0,
+        uris: [],
+        collection: collection || '',
+      });
+    }
+  }
+  return out;
+}
+
 function parseLiked(entries) {
   const out = [];
   for (const e of entries) {
@@ -752,13 +795,16 @@ const ROUTES = [
   [/^archived_posts\.json$/i,           j => parseMediaPosts(entriesOf(j), 'archived')],
   [/^stories\.json$/i,                  j => parseMediaPosts(entriesOf(j), 'story')],
   [/^(your_reels|reels)\.json$/i,       j => parseMediaPosts(entriesOf(j), 'post')],
-  [/^saved_posts\.json$/i,              j => parseSaved(entriesOf(j))],
+  [/^saved_posts(_\d+)?\.json$/i,        j => parseSaved(entriesOf(j))],
+  [/^saved_collections(_\d+)?\.json$/i,  j => parseSavedCollections(entriesOf(j))],
   [/^liked_posts\.json$/i,              j => parseLiked(entriesOf(j))],
   [/^followers(_\d+)?\.json$/i,         j => parseRelations(entriesOf(j), 'follower')],
   [/^following\.json$/i,                j => parseRelations(entriesOf(j), 'following')],
   [/^close_friends\.json$/i,            j => parseRelations(entriesOf(j), 'close')],
   [/^pending_follow_requests\.json$/i,  j => parseRelations(entriesOf(j), 'pending')],
   [/^blocked_profiles\.json$/i,         j => parseRelations(entriesOf(j), 'blocked')],
+  // dernier recours : tout autre fichier du dossier des enregistrements
+  [/^saved[a-z0-9_]*\.json$/i,           j => parseSaved(entriesOf(j))],
 ];
 
 function routeFor(path) {
@@ -880,6 +926,12 @@ async function zipBlob(zip, e) {
 
 async function zipText(zip, e) { return (await zipBlob(zip, e)).text(); }
 
+/* Journal de lecture : chaque fichier JSON de l'archive y figure, lu ou non.
+   C'est ce qui permet de comprendre une catégorie manquante. */
+function reportAdd(list, name, size, kind, count, error) {
+  list.push({ name, size, kind: kind || null, count: count || 0, error: error || null });
+}
+
 async function importZip(file) {
   status('Ouverture de l\'archive…');
   let zip;
@@ -890,8 +942,13 @@ async function importZip(file) {
   }
   const media = new MediaStore();
   const jsons = [];
+  const report = [];
   for (const e of zip.entries) {
-    if (/\.json$/i.test(e.name)) { if (routeFor(e.name)) jsons.push(e); continue; }
+    if (/\.json$/i.test(e.name)) {
+      if (routeFor(e.name)) jsons.push(e);
+      else reportAdd(report, e.name, e.usize, null, 0, null);
+      continue;
+    }
     if (IMAGE_EXT.test(e.name) || VIDEO_EXT.test(e.name)) media.add(e.name, () => zipBlob(zip, e));
   }
   if (!jsons.length) {
@@ -902,14 +959,19 @@ async function importZip(file) {
   let done = 0;
   for (const e of jsons) {
     status('Lecture : ' + esc(e.name.split('/').pop()) + ' (' + (++done) + '/' + jsons.length + ')');
-    try { all = all.concat(routeFor(e.name)(JSON.parse(await zipText(zip, e))) || []); }
-    catch (err) { /* fichier illisible : on continue avec les autres */ }
+    try {
+      const got = routeFor(e.name)(JSON.parse(await zipText(zip, e))) || [];
+      all = all.concat(got);
+      reportAdd(report, e.name, e.usize, got.length ? got[0].type : 'vide', got.length, null);
+    } catch (err) {
+      reportAdd(report, e.name, e.usize, 'erreur', 0, err && err.message);
+    }
   }
   if (!all.length) {
     status('<span style="color:var(--drop)">Les fichiers de l\'archive ne contiennent aucun élément exploitable.</span>');
     return;
   }
-  boot(all, media, media.byPath.size > 0);
+  boot(all, media, media.byPath.size > 0, report);
 }
 
 async function importFiles(fileList) {
@@ -919,11 +981,13 @@ async function importFiles(fileList) {
 
   const media = new MediaStore();
   const jsons = [];
+  const report = [];
   for (const f of files) {
     const path = f.webkitRelativePath || f.name;
     if (/\.json$/i.test(path)) {
       if (routeFor(path)) jsons.push({ path, file: f });
       else if (f.size < 12e6) jsons.push({ path, file: f, maybeBackup: true });
+      else reportAdd(report, path, f.size, null, 0, null);
       continue;
     }
     if (IMAGE_EXT.test(path) || VIDEO_EXT.test(path)) media.add(path, () => Promise.resolve(f));
@@ -937,16 +1001,24 @@ async function importFiles(fileList) {
   for (const j of jsons) {
     status('Lecture : ' + esc(j.path.split('/').pop()) + ' (' + (++done) + '/' + jsons.length + ')');
     let json;
-    try { json = JSON.parse(await j.file.text()); } catch (e) { continue; }
+    try { json = JSON.parse(await j.file.text()); }
+    catch (e) { reportAdd(report, j.path, j.file.size, 'erreur', 0, 'JSON illisible'); continue; }
     if (json && json.__triInstagram && json.decisions) { restoreBackup(json); continue; }
     const fn = routeFor(j.path);
-    if (fn) all = all.concat(fn(json) || []);
+    if (!fn) { reportAdd(report, j.path, j.file.size, null, 0, null); continue; }
+    try {
+      const got = fn(json) || [];
+      all = all.concat(got);
+      reportAdd(report, j.path, j.file.size, got.length ? got[0].type : 'vide', got.length, null);
+    } catch (e) {
+      reportAdd(report, j.path, j.file.size, 'erreur', 0, e && e.message);
+    }
   }
   if (!all.length) {
     status('<span style="color:var(--drop)">Les fichiers lus ne contiennent aucun élément exploitable.</span>');
     return;
   }
-  boot(all, media, media.byPath.size > 0);
+  boot(all, media, media.byPath.size > 0, report);
 }
 
 function restoreBackup(json) {
@@ -972,11 +1044,12 @@ function demoData() {
   return out;
 }
 
-function boot(rawItems, media, hasMedia) {
+function boot(rawItems, media, hasMedia, report) {
   if (S.media) S.media.release();
   S.items = finalize(rawItems);
   S.media = media || new MediaStore();
   S.hasMedia = !!hasMedia;
+  S.report = Array.isArray(report) ? report : [];
   S.selection.clear();
   S.history.length = 0;
   if (!S.items.length) {
@@ -995,6 +1068,7 @@ function boot(rawItems, media, hasMedia) {
   $('#screen-app').classList.remove('hidden');
   $('#btn-export').classList.remove('hidden');
   $('#btn-reset').classList.remove('hidden');
+  $('#btn-report').classList.toggle('hidden', !S.report.length);
   renderAll();
   toast(fmtNum(S.items.length) + ' éléments chargés');
 }
@@ -1655,6 +1729,77 @@ function openExport() {
   $('#dlg-export').showModal();
 }
 
+/* -------------------------------- rapport ------------------------------ */
+
+function reportText() {
+  const read = S.report.filter(r => r.kind && r.kind !== 'erreur');
+  const errs = S.report.filter(r => r.kind === 'erreur');
+  const skipped = S.report.filter(r => !r.kind);
+  const lines = ['Rapport d\'import — Tri Instagram', ''];
+  lines.push('Fichiers lus (' + read.length + ') :');
+  read.forEach(r => lines.push('  ' + r.name + '  →  ' + (TYPE_LABEL[r.kind] || r.kind) + ' : ' + r.count));
+  if (errs.length) {
+    lines.push('', 'Fichiers en erreur (' + errs.length + ') :');
+    errs.forEach(r => lines.push('  ' + r.name + '  →  ' + (r.error || 'erreur')));
+  }
+  lines.push('', 'Fichiers ignorés (' + skipped.length + ') :');
+  groupSkipped(skipped).forEach(g => {
+    lines.push('  ' + g.dir + '  (' + g.files.length + ')');
+    g.files.slice(0, 8).forEach(f => lines.push('      ' + f));
+    if (g.files.length > 8) lines.push('      … et ' + (g.files.length - 8) + ' autres');
+  });
+  lines.push('', 'Total : ' + fmtNum(S.items.length) + ' éléments chargés.');
+  return lines.join('\n');
+}
+
+function groupSkipped(list) {
+  const map = new Map();
+  for (const r of list) {
+    const parts = String(r.name).split('/');
+    const file = parts.pop();
+    const dir = parts.join('/') || '(racine)';
+    if (!map.has(dir)) map.set(dir, []);
+    map.get(dir).push(file);
+  }
+  return Array.from(map, ([dir, files]) => ({ dir, files }))
+    .sort((a, b) => b.files.length - a.files.length);
+}
+
+function renderReport() {
+  const read = S.report.filter(r => r.kind && r.kind !== 'erreur');
+  const errs = S.report.filter(r => r.kind === 'erreur');
+  const skipped = S.report.filter(r => !r.kind);
+  const row = r => '<tr><td>' + esc(r.name) + '</td><td class="n ' +
+    (r.kind === 'erreur' ? 'rep-err' : r.count ? 'rep-ok' : 'rep-no') + '">' +
+    (r.kind === 'erreur' ? esc(r.error || 'erreur') : (TYPE_LABEL[r.kind] || r.kind) + ' · ' + fmtNum(r.count)) +
+    '</td></tr>';
+  let html = '<p style="margin-top:0;color:var(--txt-2);font-size:14px">' +
+    'Chaque fichier de données de votre archive figure ici. Si une catégorie manque, ' +
+    'son fichier est soit absent, soit dans la liste des ignorés sous un nom que je ne connais pas encore.</p>';
+  html += '<h4 style="margin:16px 0 6px">Fichiers lus · ' + read.length + '</h4>';
+  html += read.length ? '<table class="rep-t"><tr><th>Fichier</th><th style="text-align:right">Contenu</th></tr>' +
+    read.map(row).join('') + '</table>' : '<p class="rep-no" style="font-size:13px">Aucun.</p>';
+  if (errs.length) {
+    html += '<h4 style="margin:18px 0 6px">Fichiers en erreur · ' + errs.length + '</h4>' +
+      '<table class="rep-t">' + errs.map(row).join('') + '</table>';
+  }
+  const groups = groupSkipped(skipped);
+  html += '<h4 style="margin:18px 0 6px">Fichiers ignorés · ' + skipped.length + '</h4>';
+  html += groups.length ? '<table class="rep-t"><tr><th>Dossier</th><th style="text-align:right">Fichiers</th></tr>' +
+    groups.map(g => '<tr><td>' + esc(g.dir) + '<div class="rep-no" style="margin-top:3px">' +
+      esc(g.files.slice(0, 6).join(', ')) + (g.files.length > 6 ? ' …' : '') + '</div></td>' +
+      '<td class="n rep-no">' + fmtNum(g.files.length) + '</td></tr>').join('') + '</table>'
+    : '<p class="rep-no" style="font-size:13px">Aucun.</p>';
+  $('#report-body').innerHTML = html;
+}
+
+$('#btn-report').addEventListener('click', () => { renderReport(); $('#dlg-report').showModal(); });
+$('#report-copy').addEventListener('click', async () => {
+  const txt = reportText();
+  try { await navigator.clipboard.writeText(txt); toast('Rapport copié'); }
+  catch (e) { toast('Copie refusée par le navigateur'); }
+});
+
 /* -------------------------------- événements --------------------------- */
 
 $('#tabs').addEventListener('click', e => {
@@ -1785,6 +1930,7 @@ $('#btn-reset').addEventListener('click', () => {
   $('#screen-app').classList.add('hidden');
   $('#btn-export').classList.add('hidden');
   $('#btn-reset').classList.add('hidden');
+  $('#btn-report').classList.add('hidden');
   $('#screen-import').classList.remove('hidden');
   status('');
   renderResume();
