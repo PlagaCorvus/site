@@ -312,6 +312,12 @@ ul.plain li{margin-bottom:6px}
 })();
 </script>
 
+<div id="rescue" style="display:none;background:#1b1708;color:#f2f2f4;border-bottom:1px solid #6b5a1e;padding:12px 16px;font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+  <b>Mode secours.</b> La zone de dépôt ne s'affiche pas correctement. Choisissez l'archive ici :
+  <input type="file" id="file-rescue" accept=".zip,.rar,.7z" multiple style="display:block;margin:8px 0;font:inherit;color:inherit">
+  <span id="rescue-status" style="color:#a0a0ad"></span>
+</div>
+
 <div class="topbar">
   <div class="wrap topbar-in">
     <div class="brand"><span class="dot"></span><span>Tri Instagram<small>Tout se passe sur votre appareil · v<span id="ver"></span></small></span></div>
@@ -568,7 +574,7 @@ const TYPES = [
 ];
 const TYPE_LABEL = Object.fromEntries(TYPES.map(t => [t.key, t.label]));
 const DEC_LABEL = { keep:'Gardé', remove:'À retirer', later:'Plus tard' };
-const APP_VERSION = '2.2';
+const APP_VERSION = '2.3';
 const LS_DEC = 'tri-ig:decisions';
 const ARCHIVE_EXT = /\.(zip|rar|7z|gz|tgz|tar|bz2|xz)$/i;
 const LS_SNAP = 'tri-ig:snapshot';
@@ -650,7 +656,9 @@ function loadDecisions() {
    stockage simple, si celui-ci a été bloqué ou saturé. On garde le plus riche. */
 async function mergeDecisionsFromIdb() {
   let fromIdb = null;
-  try { fromIdb = await idbGet(LS_DEC); } catch (e) { return; }
+  const t0 = performance.now();
+  try { fromIdb = await idbGet(LS_DEC); } catch (e) { logEvent('base locale : décisions illisibles (' + (e && e.message) + ')'); return; }
+  logEvent('base locale : décisions lues en ' + Math.round(performance.now() - t0) + ' ms : ' + (fromIdb ? Object.keys(fromIdb).length : 0));
   if (!fromIdb || typeof fromIdb !== 'object') return;
   const mine = Object.keys(S.decisions).length;
   const theirs = Object.keys(fromIdb).length;
@@ -1140,6 +1148,8 @@ function logText() {
 
 function status(msg, kind) {
   logEvent((kind === 'error' ? 'ERREUR ' : 'état ') + String(msg).replace(/<[^>]+>/g, ''));
+  const rs = $('#rescue-status');
+  if (rs && $('#rescue').style.display === 'block') rs.textContent = String(msg).replace(/<[^>]+>/g, '');
   const el = $('#import-status');
   if (!el) return;
   el.innerHTML = kind === 'error' ? '<span style="color:var(--drop)">' + msg + '</span>' : msg;
@@ -1438,6 +1448,7 @@ function boot(rawItems, media, hasMedia, report) {
   saveSnapshot();
   $('#screen-import').classList.add('hidden');
   $('#screen-app').classList.remove('hidden');
+  $('#rescue').style.display = 'none';
   $('#btn-export').classList.remove('hidden');
   $('#btn-reset').classList.remove('hidden');
   $('#btn-report').classList.toggle('hidden', !S.report.length);
@@ -1460,7 +1471,9 @@ function saveSnapshot() {
 
 async function loadSnapshot() {
   let snap = null;
-  try { snap = await idbGet(LS_SNAP); } catch (e) { snap = null; }
+  const t0 = performance.now();
+  try { snap = await idbGet(LS_SNAP); } catch (e) { snap = null; logEvent('base locale : session illisible (' + (e && e.message) + ')'); }
+  logEvent('base locale : session lue en ' + Math.round(performance.now() - t0) + ' ms : ' + (snap && snap.items ? snap.items.length + ' éléments' : 'aucune'));
   if (!snap) {
     try { const raw = localStorage.getItem(LS_SNAP); snap = raw ? JSON.parse(raw) : null; } catch (e) { snap = null; }
   }
@@ -2661,7 +2674,41 @@ window.addEventListener('unhandledrejection', e => {
 window.__appStarted = true;
 (function () { const b = $('#boot'); if (b) b.style.display = 'none'; })();
 logEvent('script démarré', { version: APP_VERSION, protocole: location.protocol, intégré: EMBEDDED,
-  decompression: typeof DecompressionStream !== 'undefined', baseLocale: !!window.indexedDB });
+  decompression: typeof DecompressionStream !== 'undefined', baseLocale: !!window.indexedDB, document: document.readyState });
+
+/* Chronologie du chargement : dit où le temps passe quand la page est
+   longue à s'afficher, et si la mise en page a bien produit la zone de dépôt. */
+window.addEventListener('DOMContentLoaded', () => logEvent('document analysé'));
+window.addEventListener('load', () => {
+  const n = performance.getEntriesByType ? performance.getEntriesByType('navigation')[0] : null;
+  logEvent('chargement terminé', n ? { interactif: Math.round(n.domInteractive), complet: Math.round(n.domComplete), fin: Math.round(n.loadEventEnd) } : undefined);
+});
+requestAnimationFrame(() => logEvent('première image affichée'));
+const rectOf = el => { if (!el) return null; const b = el.getBoundingClientRect(); return { x: Math.round(b.x), y: Math.round(b.y), l: Math.round(b.width), h: Math.round(b.height) }; };
+function layoutCheck(label) {
+  const zone = rectOf($('#dropzone'));
+  const info = {
+    fenêtre: innerWidth + 'x' + innerHeight, zoom: devicePixelRatio, visible: !document.hidden,
+    hauteurPage: document.body.scrollHeight, importCaché: $('#screen-import').classList.contains('hidden'),
+    import: rectOf($('#screen-import')), zone, bouton: rectOf($('#pick-zip')),
+    fond: getComputedStyle(document.body).backgroundColor,
+  };
+  logEvent('mise en page ' + label, info);
+  const broken = !zone || zone.h < 40 || zone.l < 40 || info.hauteurPage < 200 || info.importCaché;
+  if (broken && $('#screen-app').classList.contains('hidden')) {
+    $('#rescue').style.display = 'block';
+    logEvent('mode secours affiché');
+  }
+  return info;
+}
+setTimeout(() => layoutCheck('à 2 s'), 2000);
+$('#file-rescue').addEventListener('change', async e => {
+  const files = e.target.files;
+  logEvent('secours : ' + files.length + ' fichier(s)');
+  $('#rescue-status').textContent = files.length ? 'Reçu, analyse…' : 'Aucun fichier.';
+  try { await importAny(files); } catch (err) { $('#rescue-status').textContent = 'Erreur : ' + (err && err.message); }
+  e.target.value = '';
+});
 if ($('#ver')) $('#ver').textContent = APP_VERSION;
 envLine();
 /* Le travail sur la base locale attend le premier affichage. */
