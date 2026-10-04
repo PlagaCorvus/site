@@ -574,7 +574,7 @@ const TYPES = [
 ];
 const TYPE_LABEL = Object.fromEntries(TYPES.map(t => [t.key, t.label]));
 const DEC_LABEL = { keep:'Gardé', remove:'À retirer', later:'Plus tard' };
-const APP_VERSION = '2.3';
+const APP_VERSION = '2.4';
 const LS_DEC = 'tri-ig:decisions';
 const ARCHIVE_EXT = /\.(zip|rar|7z|gz|tgz|tar|bz2|xz)$/i;
 const LS_SNAP = 'tri-ig:snapshot';
@@ -1422,8 +1422,9 @@ function demoData() {
   return out;
 }
 
-function boot(rawItems, media, hasMedia, report) {
+function boot(rawItems, media, hasMedia, report, opts) {
   const tb = performance.now();
+  const isDemo = !!(opts && opts.demo);
   if (S.media) S.media.release();
   S.items = finalize(rawItems);
   S.media = media || new MediaStore();
@@ -1445,7 +1446,7 @@ function boot(rawItems, media, hasMedia, report) {
   S.collection = null;
   S.q = '';
   $('#q').value = '';
-  saveSnapshot();
+  if (!isDemo) saveSnapshot();
   $('#screen-import').classList.add('hidden');
   $('#screen-app').classList.remove('hidden');
   $('#rescue').style.display = 'none';
@@ -2582,7 +2583,9 @@ function armDialogWatch(label) {
 function dialogAnswered(label, n) {
   clearTimeout(dialogWatch);
   logEvent('boîte « ' + label + ' » : ' + (n ? n + ' fichier(s) choisi(s)' : 'fermée sans fichier'));
-  if (!n) status('Aucun fichier choisi. Vous pouvez aussi glisser l\'archive sur cette zone.');
+  if (!n) status('Le navigateur n\'a reçu aucun fichier. Si vous en aviez pourtant choisi un, c\'est le sélecteur de fichiers de votre bureau ' +
+    'qui n\'a pas transmis la sélection, un souci connu sous Linux avec GNOME. <b>Glissez l\'archive</b> depuis une fenêtre de fichiers ' +
+    'jusque sur cette zone : ce chemin ne passe pas par ce sélecteur.', 'error');
 }
 $('#pick-zip').addEventListener('click', () => { logEvent('clic : Choisir l\'archive'); armDialogWatch('archive'); $('#file-zip').click(); });
 $('#pick-folder').addEventListener('click', () => { logEvent('clic : Choisir le dossier'); armDialogWatch('dossier'); $('#file-folder').click(); });
@@ -2605,7 +2608,7 @@ $('#file-folder').addEventListener('change', async e => {
   catch (err) { status('Erreur de lecture : ' + esc(err && err.message || err), 'error'); }
   e.target.value = '';
 });
-$('#pick-demo').addEventListener('click', () => { logEvent('clic : exemple'); boot(demoData(), new MediaStore(), false); });
+$('#pick-demo').addEventListener('click', () => { logEvent('clic : exemple'); boot(demoData(), new MediaStore(), false, [], { demo: true }); });
 
 /* bouton de reprise de session */
 async function renderResume() {
