@@ -61,6 +61,17 @@ Instagram ne permet pas de supprimer ou de se désabonner en masse depuis l'ext�
 L'application produit la liste des éléments à traiter ; les actions se font ensuite dans
 l'application Instagram, lien par lien.
 
+## Si rien ne se passe
+
+La ligne en bas de l'écran d'import indique la version, le mode d'ouverture et le
+navigateur. Elle signale aussi un contexte où la page ne peut pas fonctionner, comme
+un aperçu intégré dans une visionneuse : dans ce cas, enregistrez le fichier et ouvrez-le
+avec votre navigateur. Toute erreur inattendue s'affiche en clair dans cette zone.
+
+Les archives RAR ou 7z ne sont pas lisibles par un navigateur. Instagram livre un `.zip` :
+utilisez-le tel quel. Si l'export est livré en plusieurs parties, déposez tous les `.zip`
+en une seule fois.
+
 ## Développement
 
 Fichier unique `index.html`, sans dépendance ni étape de compilation. Ouvrir le fichier

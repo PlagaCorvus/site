@@ -289,7 +289,7 @@ ul.plain li{margin-bottom:6px}
 
 <div class="topbar">
   <div class="wrap topbar-in">
-    <div class="brand"><span class="dot"></span><span>Tri Instagram<small>Tout se passe sur votre appareil</small></span></div>
+    <div class="brand"><span class="dot"></span><span>Tri Instagram<small>Tout se passe sur votre appareil · v<span id="ver"></span></small></span></div>
     <div class="spacer"></div>
     <button class="btn sm ghost hidden" id="btn-report">Rapport</button>
     <button class="btn sm ghost" id="btn-help">Aide</button>
@@ -308,13 +308,13 @@ ul.plain li{margin-bottom:6px}
 
   <div class="drop" id="dropzone">
     <h2>Déposez votre archive ici</h2>
-    <p>Fichier <code>.zip</code> téléchargé depuis Instagram, ou le dossier décompressé.</p>
+    <p>Le fichier <code>.zip</code> envoyé par Instagram, plusieurs à la fois si l'export est en parties, ou le dossier décompressé.</p>
     <div class="drop-actions">
-      <button class="btn primary" id="pick-zip">Choisir l'archive .zip</button>
+      <button class="btn primary" id="pick-zip">Choisir l'archive</button>
       <button class="btn" id="pick-folder">Choisir le dossier</button>
       <button class="btn ghost" id="pick-demo">Essayer avec un exemple</button>
     </div>
-    <input type="file" id="file-zip" class="hidden" accept=".zip,application/zip">
+    <input type="file" id="file-zip" class="hidden" accept=".zip,.rar,.7z,application/zip,application/x-zip-compressed" multiple>
     <input type="file" id="file-folder" class="hidden" webkitdirectory directory multiple>
     <p id="import-status" style="margin-top:14px"></p>
   </div>
@@ -330,6 +330,7 @@ ul.plain li{margin-bottom:6px}
       <p>Marquez chaque élément, puis exportez votre liste de liens à traiter dans l'application Instagram.</p></div>
   </div>
   <p class="note">Vos décisions sont enregistrées dans ce navigateur : vous pouvez fermer l'onglet et reprendre plus tard.</p>
+  <p class="note" id="env-line" style="margin-top:-30px;font-size:12px;opacity:.8"></p>
 </section>
 
 <!-- ============ ÉCRAN PRINCIPAL ============ -->
@@ -527,7 +528,9 @@ const TYPES = [
 ];
 const TYPE_LABEL = Object.fromEntries(TYPES.map(t => [t.key, t.label]));
 const DEC_LABEL = { keep:'Gardé', remove:'À retirer', later:'Plus tard' };
+const APP_VERSION = '2.0';
 const LS_DEC = 'tri-ig:decisions';
+const ARCHIVE_EXT = /\.(zip|rar|7z|gz|tgz|tar|bz2|xz)$/i;
 const LS_SNAP = 'tri-ig:snapshot';
 const PAGE = 120;
 const VIDEO_EXT = /\.(mp4|mov|m4v|webm)$/i;
@@ -563,15 +566,65 @@ function saveFlag(key, val) {
   try { localStorage.setItem(key, val ? '1' : '0'); } catch (e) {}
 }
 
+/* Base locale : sans limite pratique de taille, contrairement au stockage
+   simple plafonné à quelques mégaoctets. Les décisions y sont doublées, et
+   la bibliothèque elle-même y est gardée pour reprendre sans redéposer. */
+function idbOpen() {
+  return new Promise((res, rej) => {
+    if (!window.indexedDB) return rej(new Error('base locale indisponible'));
+    let r;
+    try { r = indexedDB.open('tri-instagram', 1); } catch (e) { return rej(e); }
+    r.onupgradeneeded = () => { r.result.createObjectStore('kv'); };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error || new Error('ouverture refusée'));
+    r.onblocked = () => rej(new Error('base bloquée'));
+  });
+}
+async function idbSet(key, val) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('kv', 'readwrite');
+    tx.objectStore('kv').put(val, key);
+    tx.oncomplete = () => { db.close(); res(); };
+    tx.onerror = () => { db.close(); rej(tx.error); };
+  });
+}
+async function idbGet(key) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('kv', 'readonly');
+    const q = tx.objectStore('kv').get(key);
+    q.onsuccess = () => { db.close(); res(q.result); };
+    q.onerror = () => { db.close(); rej(q.error); };
+  });
+}
+async function idbDel(key) {
+  try { const db = await idbOpen(); const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').delete(key); await new Promise(r => { tx.oncomplete = r; tx.onerror = r; }); db.close(); } catch (e) {}
+}
+
 function loadDecisions() {
   try { return JSON.parse(localStorage.getItem(LS_DEC) || '{}') || {}; }
   catch (e) { return {}; }
+}
+/* Au démarrage, la base locale peut détenir plus de décisions que le
+   stockage simple, si celui-ci a été bloqué ou saturé. On garde le plus riche. */
+async function mergeDecisionsFromIdb() {
+  let fromIdb = null;
+  try { fromIdb = await idbGet(LS_DEC); } catch (e) { return; }
+  if (!fromIdb || typeof fromIdb !== 'object') return;
+  const mine = Object.keys(S.decisions).length;
+  const theirs = Object.keys(fromIdb).length;
+  if (theirs > mine) {
+    S.decisions = Object.assign({}, fromIdb, S.decisions);
+    if (S.items.length) { rebuildStats(); refreshLight(); }
+  }
 }
 let saveTimer = null;
 function saveDecisions() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     try { localStorage.setItem(LS_DEC, JSON.stringify(S.decisions)); } catch (e) {}
+    idbSet(LS_DEC, S.decisions).catch(() => {});
   }, 800);
 }
 
@@ -1025,7 +1078,32 @@ function finalize(items) {
 
 /* ------------------------------- import -------------------------------- */
 
-function status(msg) { $('#import-status').innerHTML = msg; }
+function status(msg, kind) {
+  const el = $('#import-status');
+  if (!el) return;
+  el.innerHTML = kind === 'error' ? '<span style="color:var(--drop)">' + msg + '</span>' : msg;
+}
+
+function fmtBytes(n) {
+  if (!(n > 0)) return '0 o';
+  const u = ['o', 'Ko', 'Mo', 'Go'];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i ? n.toFixed(n < 10 ? 1 : 0) : n) + ' ' + u[i];
+}
+
+/* Identifie un fichier par ses premiers octets, pas par son extension :
+   un .zip renommé, un .rar, un téléchargement incomplet. */
+async function sniff(file) {
+  let b;
+  try { b = new Uint8Array(await file.slice(0, 8).arrayBuffer()); } catch (e) { return 'illisible'; }
+  if (b.length < 4) return 'autre';
+  if (b[0] === 0x50 && b[1] === 0x4B && (b[2] === 3 || b[2] === 5 || b[2] === 7)) return 'zip';
+  if (b[0] === 0x52 && b[1] === 0x61 && b[2] === 0x72 && b[3] === 0x21) return 'rar';
+  if (b[0] === 0x37 && b[1] === 0x7A && b[2] === 0xBC && b[3] === 0xAF) return '7z';
+  if (b[0] === 0x1F && b[1] === 0x8B) return 'gzip';
+  return 'autre';
+}
 
 /* ------------------------- lecteur ZIP natif ---------------------------
    Lit l'archive directement (central directory + inflate via
@@ -1127,105 +1205,127 @@ function reportAdd(list, name, size, kind, count, error, shape) {
   list.push({ name, size, kind: kind || null, count: count || 0, error: error || null, shape: shape || null });
 }
 
-async function importZip(file) {
-  status('Ouverture de l\'archive…');
-  let zip;
-  try { zip = await openZip(file); }
-  catch (err) {
-    status('<span style="color:var(--drop)">' + esc(err.message) + '</span>');
+/* Point d'entrée unique : sélection, dépôt, une ou plusieurs archives,
+   dossier décompressé, sauvegarde JSON. Chaque chemin produit un message. */
+async function importAny(fileList) {
+  const files = Array.from(fileList || []);
+  if (!files.length) {
+    status('Aucun fichier reçu. Réessayez, ou glissez l\'archive directement sur cette zone.', 'error');
     return;
   }
-  const media = new MediaStore();
-  const jsons = [];
-  const report = [];
-  for (const e of zip.entries) {
-    if (/\.json$/i.test(e.name)) {
-      if (routeFor(e.name)) jsons.push(e);
-      else reportAdd(report, e.name, e.usize, null, 0, null);
-      continue;
+  const total = files.reduce((a, f) => a + (f.size || 0), 0);
+  status('Reçu : ' + (files.length === 1 ? '<b>' + esc(files[0].name) + '</b>' : files.length + ' fichiers') +
+    ' · ' + fmtBytes(total) + '. Analyse en cours…');
+  await new Promise(r => setTimeout(r, 0));
+
+  const zips = [], loose = [];
+  for (const f of files) {
+    const name = f.webkitRelativePath || f.name || '';
+    const isData = /\.json$/i.test(name) || IMAGE_EXT.test(name) || VIDEO_EXT.test(name);
+    if (isData && !ARCHIVE_EXT.test(name)) { loose.push(f); continue; }
+    const kind = await sniff(f);
+    if (kind === 'zip') { zips.push(f); continue; }
+    if (kind === 'rar' || kind === '7z' || kind === 'gzip') {
+      status('<b>' + esc(f.name) + '</b> est une archive ' + kind.toUpperCase() +
+        ', que le navigateur ne sait pas ouvrir. Instagram livre un fichier <b>.zip</b> : utilisez-le tel quel. ' +
+        'Si vous avez recompressé l\'export, décompressez-le puis cliquez sur « Choisir le dossier ».', 'error');
+      return;
     }
-    if (IMAGE_EXT.test(e.name) || VIDEO_EXT.test(e.name)) media.add(e.name, () => zipBlob(zip, e));
-  }
-  if (!jsons.length) {
-    status('<span style="color:var(--drop)">Aucun fichier de données reconnu dans cette archive. Vérifiez que l\'export a bien été demandé au format JSON.</span>');
-    return;
-  }
-  let all = [];
-  let done = 0;
-  for (const e of jsons) {
-    status('Lecture : ' + esc(e.name.split('/').pop()) + ' (' + (++done) + '/' + jsons.length + ')');
-    try {
-      const json = JSON.parse(await zipText(zip, e));
-      const got = routeFor(e.name)(json) || [];
-      all = all.concat(got);
-      reportAdd(report, e.name, e.usize, got.length ? got[0].type : 'vide', got.length, null,
-        got.length ? null : describeShape(json));
-    } catch (err) {
-      reportAdd(report, e.name, e.usize, 'erreur', 0, err && err.message);
+    if (ARCHIVE_EXT.test(name) || kind === 'illisible') {
+      status('<b>' + esc(f.name) + '</b> n\'est pas une archive .zip lisible (' + fmtBytes(f.size) + '). ' +
+        'Le téléchargement est peut-être incomplet : relancez-le depuis le lien envoyé par Instagram.', 'error');
+      return;
     }
+    loose.push(f);
   }
-  if (!all.length) {
-    status('<span style="color:var(--drop)">Les fichiers de l\'archive ne contiennent aucun élément exploitable.</span>');
+  if (!zips.length && !loose.length) {
+    status('Rien d\'exploitable dans les fichiers reçus.', 'error');
     return;
   }
-  boot(all, media, media.byPath.size > 0, report);
+  await importArchives(zips, loose);
 }
 
-async function importFiles(fileList) {
-  const files = Array.from(fileList);
-  const zipFile = files.find(f => /\.zip$/i.test(f.name));
-  if (zipFile && files.length === 1) return importZip(zipFile);
-
+async function importArchives(zips, loose) {
   const media = new MediaStore();
-  const jsons = [];
   const report = [];
-  for (const f of files) {
+  const jobs = [];
+  for (const file of zips) {
+    status('Ouverture de <b>' + esc(file.name) + '</b> (' + fmtBytes(file.size) + ')…');
+    let zip;
+    try { zip = await openZip(file); }
+    catch (err) {
+      status('<b>' + esc(file.name) + '</b> : ' + esc(err.message) + '.', 'error');
+      return;
+    }
+    for (const e of zip.entries) {
+      if (/\.json$/i.test(e.name)) {
+        if (routeFor(e.name)) jobs.push({ name: e.name, size: e.usize, read: () => zipText(zip, e) });
+        else reportAdd(report, e.name, e.usize, null, 0, null);
+        continue;
+      }
+      if (IMAGE_EXT.test(e.name) || VIDEO_EXT.test(e.name)) media.add(e.name, () => zipBlob(zip, e));
+    }
+  }
+  for (const f of loose) {
     const path = f.webkitRelativePath || f.name;
     if (/\.json$/i.test(path)) {
-      if (routeFor(path)) jsons.push({ path, file: f });
-      else if (f.size < 12e6) jsons.push({ path, file: f, maybeBackup: true });
+      if (routeFor(path)) jobs.push({ name: path, size: f.size, read: () => f.text() });
+      else if (f.size < 12e6) jobs.push({ name: path, size: f.size, read: () => f.text(), maybeBackup: true });
       else reportAdd(report, path, f.size, null, 0, null);
       continue;
     }
     if (IMAGE_EXT.test(path) || VIDEO_EXT.test(path)) media.add(path, () => Promise.resolve(f));
   }
-  if (!jsons.length) {
-    status('<span style="color:var(--drop)">Aucun fichier de données reconnu. Sélectionnez le dossier racine de l\'export décompressé.</span>');
+  if (!jobs.length) {
+    status('Aucun fichier de données reconnu' + (zips.length ? ' dans l\'archive' : '') +
+      '. Vérifiez que l\'export a été demandé au format <b>JSON</b> et non HTML.', 'error');
     return;
   }
   let all = [];
   let done = 0;
-  for (const j of jsons) {
-    status('Lecture : ' + esc(j.path.split('/').pop()) + ' (' + (++done) + '/' + jsons.length + ')');
+  let restored = 0;
+  for (const j of jobs) {
+    status('Lecture : ' + esc(j.name.split('/').pop()) + ' (' + (++done) + '/' + jobs.length + ')');
     let json;
-    try { json = JSON.parse(await j.file.text()); }
-    catch (e) { reportAdd(report, j.path, j.file.size, 'erreur', 0, 'JSON illisible'); continue; }
-    if (json && json.__triInstagram && json.decisions) { restoreBackup(json); continue; }
-    const fn = routeFor(j.path);
-    if (!fn) { reportAdd(report, j.path, j.file.size, null, 0, null); continue; }
+    try { json = JSON.parse(await j.read()); }
+    catch (err) { reportAdd(report, j.name, j.size, 'erreur', 0, err && err.message); continue; }
+    if (json && json.__triInstagram && json.decisions) { restored += restoreBackup(json); continue; }
+    const fn = routeFor(j.name);
+    if (!fn) { reportAdd(report, j.name, j.size, null, 0, null); continue; }
     try {
       const got = fn(json) || [];
       all = all.concat(got);
-      reportAdd(report, j.path, j.file.size, got.length ? got[0].type : 'vide', got.length, null,
+      reportAdd(report, j.name, j.size, got.length ? got[0].type : 'vide', got.length, null,
         got.length ? null : describeShape(json));
-    } catch (e) {
-      reportAdd(report, j.path, j.file.size, 'erreur', 0, e && e.message);
+    } catch (err) {
+      reportAdd(report, j.name, j.size, 'erreur', 0, err && err.message);
     }
   }
   if (!all.length) {
-    status('<span style="color:var(--drop)">Les fichiers lus ne contiennent aucun élément exploitable.</span>');
+    S.report = report;
+    $('#btn-report').classList.toggle('hidden', !report.length);
+    status(restored
+      ? restored + ' décision(s) restaurée(s). Déposez maintenant votre archive.'
+      : 'Les fichiers lus ne contiennent aucun élément exploitable. Le bouton « Rapport » en haut montre leur structure.',
+      restored ? null : 'error');
     return;
   }
   boot(all, media, media.byPath.size > 0, report);
 }
+
+/* Anciens points d'entrée, conservés pour compatibilité. */
+async function importZip(file) { return importAny([file]); }
+async function importFiles(fileList) { return importAny(fileList); }
 
 function restoreBackup(json) {
   let n = 0;
   for (const [id, dec] of Object.entries(json.decisions || {})) {
     if (['keep', 'remove', 'later'].includes(dec)) { S.decisions[id] = dec; n++; }
   }
+  rebuildStats();
   saveDecisions();
   toast(n + ' décision(s) restaurée(s)');
+  return n;
 }
 
 function demoData() {
@@ -1275,31 +1375,33 @@ function boot(rawItems, media, hasMedia, report) {
 }
 
 function saveSnapshot() {
-  try {
-    if (S.items.length > 24000) { localStorage.removeItem(LS_SNAP); return; }
-    const slim = S.items.map(i => ({ t:i.type, ti:i.title, u:i.user, h:i.href, ts:i.ts, n:i.n || 0,
-      c: (i.collections && i.collections.length) ? i.collections : undefined,
-      g: i.guessed ? 1 : undefined }));
-    localStorage.setItem(LS_SNAP, JSON.stringify({ at: Date.now(), items: slim }));
-  } catch (e) { /* quota dépassé : la reprise ne sera pas disponible */ }
+  if (S.items.length > 200000) return;
+  const slim = S.items.map(i => ({ t:i.type, ti:i.title, u:i.user, h:i.href, ts:i.ts, n:i.n || 0,
+    c: (i.collections && i.collections.length) ? i.collections : undefined,
+    g: i.guessed ? 1 : undefined, cap: i.caption || undefined }));
+  const snap = { at: Date.now(), items: slim, report: S.report || [] };
+  idbSet(LS_SNAP, snap).then(() => { try { localStorage.removeItem(LS_SNAP); } catch (e) {} }).catch(() => {
+    // repli : stockage simple, seulement si la taille le permet
+    try { if (slim.length <= 15000) localStorage.setItem(LS_SNAP, JSON.stringify(snap)); } catch (e) {}
+  });
 }
 
-function loadSnapshot() {
-  try {
-    const raw = localStorage.getItem(LS_SNAP);
-    if (!raw) return null;
-    const snap = JSON.parse(raw);
-    if (!snap || !Array.isArray(snap.items) || !snap.items.length) return null;
-    return snap;
-  } catch (e) { return null; }
+async function loadSnapshot() {
+  let snap = null;
+  try { snap = await idbGet(LS_SNAP); } catch (e) { snap = null; }
+  if (!snap) {
+    try { const raw = localStorage.getItem(LS_SNAP); snap = raw ? JSON.parse(raw) : null; } catch (e) { snap = null; }
+  }
+  if (!snap || !Array.isArray(snap.items) || !snap.items.length) return null;
+  return snap;
 }
 
-function resumeSnapshot() {
-  const snap = loadSnapshot();
-  if (!snap) return;
+async function resumeSnapshot() {
+  const snap = await loadSnapshot();
+  if (!snap) { toast('Aucune session à reprendre'); return; }
   const items = snap.items.map(i => ({ type:i.t, title:i.ti, user:i.u, href:i.h, ts:i.ts, n:i.n, uris: [],
-    collections: Array.isArray(i.c) ? i.c : [], guessed: !!i.g }));
-  boot(items, new MediaStore(), false);
+    collections: Array.isArray(i.c) ? i.c : [], guessed: !!i.g, caption: i.cap || '' }));
+  boot(items, new MediaStore(), false, snap.report || []);
   toast('Session précédente reprise (sans les images)');
 }
 
@@ -2360,30 +2462,30 @@ const dz = $('#dropzone');
 }));
 dz.addEventListener('drop', async e => {
   const files = e.dataTransfer && e.dataTransfer.files;
-  if (!files || !files.length) return;
-  try {
-    if (files.length === 1 && /\.zip$/i.test(files[0].name)) await importZip(files[0]);
-    else await importFiles(files);
-  } catch (err) { status('<span style="color:var(--drop)">Erreur de lecture : ' + esc(err.message) + '</span>'); }
+  if (!files || !files.length) { status('Le dépôt n\'a transmis aucun fichier. Utilisez le bouton « Choisir l\'archive ».', 'error'); return; }
+  try { await importAny(files); }
+  catch (err) { status('Erreur de lecture : ' + esc(err && err.message || err), 'error'); }
 });
 
 $('#pick-zip').addEventListener('click', () => $('#file-zip').click());
 $('#pick-folder').addEventListener('click', () => $('#file-folder').click());
 $('#file-zip').addEventListener('change', async e => {
-  if (!e.target.files.length) return;
-  try { await importZip(e.target.files[0]); }
-  catch (err) { status('<span style="color:var(--drop)">Erreur de lecture : ' + esc(err.message) + '</span>'); }
+  const files = e.target.files;
+  try { await importAny(files); }
+  catch (err) { status('Erreur de lecture : ' + esc(err && err.message || err), 'error'); }
+  e.target.value = '';
 });
 $('#file-folder').addEventListener('change', async e => {
-  if (!e.target.files.length) return;
-  try { await importFiles(e.target.files); }
-  catch (err) { status('<span style="color:var(--drop)">Erreur de lecture : ' + esc(err.message) + '</span>'); }
+  const files = e.target.files;
+  try { await importAny(files); }
+  catch (err) { status('Erreur de lecture : ' + esc(err && err.message || err), 'error'); }
+  e.target.value = '';
 });
 $('#pick-demo').addEventListener('click', () => boot(demoData(), new MediaStore(), false));
 
 /* bouton de reprise de session */
-function renderResume() {
-  const snap = loadSnapshot();
+async function renderResume() {
+  const snap = await loadSnapshot();
   const prev = $('#resume-box');
   if (prev) prev.remove();
   if (!snap) return;
@@ -2399,7 +2501,52 @@ function renderResume() {
   $('#btn-resume').addEventListener('click', resumeSnapshot);
 }
 
+/* ------------------------------- environnement ------------------------- */
+
+function browserName() {
+  const ua = navigator.userAgent || '';
+  const m = ua.match(/(Edg|OPR|Firefox|Chrome|Safari)\/(\d+)/g) || [];
+  const pick = m.find(x => /Edg|OPR|Firefox/.test(x)) || m.find(x => /Chrome/.test(x)) || m.find(x => /Safari/.test(x)) || 'navigateur inconnu';
+  return pick.replace('Edg/', 'Edge ').replace('OPR/', 'Opera ').replace('/', ' ');
+}
+
+function envLine() {
+  const el = $('#env-line');
+  if (!el) return;
+  const framed = (() => { try { return window.top !== window.self; } catch (e) { return true; } })();
+  const how = location.protocol === 'file:' ? 'fichier local'
+    : EMBEDDED ? 'page intégrée claude.ai'
+    : (location.host || location.protocol);
+  const caps = [];
+  if (typeof DecompressionStream === 'undefined') caps.push('décompression indisponible');
+  try { localStorage.setItem('tri-ig:t', '1'); localStorage.removeItem('tri-ig:t'); } catch (e) { caps.push('stockage local bloqué'); }
+  if (!window.indexedDB) caps.push('base locale indisponible');
+  let html = 'Version ' + APP_VERSION + ' · ' + esc(how) + ' · ' + esc(browserName());
+  if (caps.length) html += ' · <span style="color:var(--drop)">' + esc(caps.join(', ')) + '</span>';
+  if (framed && !EMBEDDED) {
+    html += '<br><span style="color:var(--drop)">Cette page est affichée dans un aperçu intégré : les boutons peuvent y rester inactifs. ' +
+      'Enregistrez le fichier sur votre ordinateur et ouvrez-le avec votre navigateur.</span>';
+  }
+  el.innerHTML = html;
+}
+
+/* Une erreur inattendue ne doit jamais se traduire par « rien ne se passe ». */
+window.addEventListener('error', e => {
+  const m = (e && e.message) || 'erreur inconnue';
+  status('Erreur inattendue : ' + esc(m) + '. Copiez ce message et envoyez-le.', 'error');
+  toast('Erreur : ' + m);
+});
+window.addEventListener('unhandledrejection', e => {
+  const r = e && e.reason;
+  const m = (r && r.message) || String(r || 'erreur inconnue');
+  status('Erreur inattendue : ' + esc(m) + '. Copiez ce message et envoyez-le.', 'error');
+  toast('Erreur : ' + m);
+});
+
 /* ------------------------------- démarrage ----------------------------- */
+envLine();
+if ($('#ver')) $('#ver').textContent = APP_VERSION;
+mergeDecisionsFromIdb();
 paintPrevBtn();
 renderResume();
 window.addEventListener('beforeunload', () => { try { localStorage.setItem(LS_DEC, JSON.stringify(S.decisions)); } catch (e) {} });
