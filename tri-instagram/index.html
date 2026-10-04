@@ -273,6 +273,9 @@ ul.plain li{margin-bottom:6px}
 .inline-link{color:var(--accent);text-decoration:none;font-weight:600}
 .inline-link:hover{text-decoration:underline}
 @media (max-width:640px){
+  .topbar-in{height:auto;min-height:56px;flex-wrap:wrap;padding:8px 0;row-gap:6px}
+  .brand{flex-shrink:1;min-width:0}
+  .brand>span{overflow:hidden;text-overflow:ellipsis}
   .hero h1{font-size:24px}
   .brand{font-size:15px}
   .stat{padding:9px 11px}
@@ -313,6 +316,7 @@ ul.plain li{margin-bottom:6px}
   <div class="wrap topbar-in">
     <div class="brand"><span class="dot"></span><span>Tri Instagram<small>Tout se passe sur votre appareil · v<span id="ver"></span></small></span></div>
     <div class="spacer"></div>
+    <button class="btn sm ghost" id="btn-log" title="Chronologie de ce qui s'est passé dans la page">Journal</button>
     <button class="btn sm ghost hidden" id="btn-report">Rapport</button>
     <button class="btn sm ghost" id="btn-help">Aide</button>
     <button class="btn sm ghost hidden" id="btn-reset">Recharger</button>
@@ -453,6 +457,20 @@ ul.plain li{margin-bottom:6px}
   </div>
 </dialog>
 
+<dialog id="dlg-log">
+  <div class="dlg-head"><h3>Journal d'incident</h3><div class="spacer"></div>
+    <button class="btn sm ghost" onclick="document.getElementById('dlg-log').close()">✕</button></div>
+  <div class="dlg-body">
+    <p style="margin:0 0 10px;color:var(--txt-2);font-size:13.5px">Chaque étape depuis l'ouverture de la page, avec son instant en secondes.
+      Si quelque chose ne se passe pas, la dernière ligne dit où ça s'est arrêté.</p>
+    <textarea class="out" id="log-out" readonly style="min-height:260px"></textarea>
+  </div>
+  <div class="dlg-foot">
+    <button class="btn" id="log-copy">Copier le journal</button>
+    <button class="btn primary" onclick="document.getElementById('dlg-log').close()">Fermer</button>
+  </div>
+</dialog>
+
 <dialog id="dlg-report">
   <div class="dlg-head"><h3>Rapport d'import</h3><div class="spacer"></div>
     <button class="btn sm ghost" onclick="document.getElementById('dlg-report').close()">✕</button></div>
@@ -550,7 +568,7 @@ const TYPES = [
 ];
 const TYPE_LABEL = Object.fromEntries(TYPES.map(t => [t.key, t.label]));
 const DEC_LABEL = { keep:'Gardé', remove:'À retirer', later:'Plus tard' };
-const APP_VERSION = '2.1';
+const APP_VERSION = '2.2';
 const LS_DEC = 'tri-ig:decisions';
 const ARCHIVE_EXT = /\.(zip|rar|7z|gz|tgz|tar|bz2|xz)$/i;
 const LS_SNAP = 'tri-ig:snapshot';
@@ -1101,7 +1119,27 @@ function finalize(items) {
 
 /* ------------------------------- import -------------------------------- */
 
+/* Journal d'incident : chaque étape, horodatée depuis l'ouverture de la
+   page. C'est ce qui permet de voir où une action s'est arrêtée. */
+const LOG = [];
+function logEvent(msg, data) {
+  const t = (window.performance && performance.now) ? performance.now() / 1000 : 0;
+  let line = t.toFixed(2).padStart(7) + ' s  ' + msg;
+  if (data !== undefined) {
+    try { line += '  ' + (typeof data === 'string' ? data : JSON.stringify(data)); } catch (e) {}
+  }
+  LOG.push(line);
+  if (LOG.length > 400) LOG.shift();
+  const out = $('#log-out');
+  if (out && $('#dlg-log') && $('#dlg-log').open) { out.value = LOG.join('\n'); out.scrollTop = out.scrollHeight; }
+}
+function logText() {
+  const head = ['Journal — Tri Instagram v' + APP_VERSION, navigator.userAgent, location.protocol + ' · ' + (EMBEDDED ? 'intégré' : 'autonome'), ''];
+  return head.concat(LOG).join('\n');
+}
+
 function status(msg, kind) {
+  logEvent((kind === 'error' ? 'ERREUR ' : 'état ') + String(msg).replace(/<[^>]+>/g, ''));
   const el = $('#import-status');
   if (!el) return;
   el.innerHTML = kind === 'error' ? '<span style="color:var(--drop)">' + msg + '</span>' : msg;
@@ -1232,6 +1270,7 @@ function reportAdd(list, name, size, kind, count, error, shape) {
    dossier décompressé, sauvegarde JSON. Chaque chemin produit un message. */
 async function importAny(fileList) {
   const files = Array.from(fileList || []);
+  logEvent('import : ' + files.length + ' fichier(s)', files.slice(0, 5).map(f => ({ nom: f.webkitRelativePath || f.name, taille: f.size, type: f.type || '' })));
   if (!files.length) {
     status('Aucun fichier reçu. Réessayez, ou glissez l\'archive directement sur cette zone.', 'error');
     return;
@@ -1247,6 +1286,7 @@ async function importAny(fileList) {
     const isData = /\.json$/i.test(name) || IMAGE_EXT.test(name) || VIDEO_EXT.test(name);
     if (isData && !ARCHIVE_EXT.test(name)) { loose.push(f); continue; }
     const kind = await sniff(f);
+    logEvent('signature de ' + f.name + ' : ' + kind);
     if (kind === 'zip') { zips.push(f); continue; }
     if (kind === 'rar' || kind === '7z' || kind === 'gzip') {
       status('<b>' + esc(f.name) + '</b> est une archive ' + kind.toUpperCase() +
@@ -1275,11 +1315,14 @@ async function importArchives(zips, loose) {
   for (const file of zips) {
     status('Ouverture de <b>' + esc(file.name) + '</b> (' + fmtBytes(file.size) + ')…');
     let zip;
+    const t0 = performance.now();
     try { zip = await openZip(file); }
     catch (err) {
+      logEvent('ouverture échouée : ' + (err && err.message));
       status('<b>' + esc(file.name) + '</b> : ' + esc(err.message) + '.', 'error');
       return;
     }
+    logEvent('archive ouverte en ' + Math.round(performance.now() - t0) + ' ms : ' + zip.entries.length + ' entrées');
     for (const e of zip.entries) {
       if (/\.json$/i.test(e.name)) {
         if (routeFor(e.name)) jobs.push({ name: e.name, size: e.usize, read: () => zipText(zip, e) });
@@ -1304,6 +1347,7 @@ async function importArchives(zips, loose) {
       '. Vérifiez que l\'export a été demandé au format <b>JSON</b> et non HTML.', 'error');
     return;
   }
+  logEvent('fichiers de données à lire : ' + jobs.length + ' · médias indexés : ' + media.byPath.size);
   let all = [];
   let done = 0;
   let restored = 0;
@@ -1320,10 +1364,13 @@ async function importArchives(zips, loose) {
       all = all.concat(got);
       reportAdd(report, j.name, j.size, got.length ? got[0].type : 'vide', got.length, null,
         got.length ? null : describeShape(json));
+      logEvent('lu ' + j.name.split('/').pop() + ' : ' + got.length + ' élément(s)');
     } catch (err) {
+      logEvent('analyse échouée ' + j.name.split('/').pop() + ' : ' + (err && err.message));
       reportAdd(report, j.name, j.size, 'erreur', 0, err && err.message);
     }
   }
+  logEvent('total analysé : ' + all.length + ' élément(s)');
   if (!all.length) {
     S.report = report;
     $('#btn-report').classList.toggle('hidden', !report.length);
@@ -1366,6 +1413,7 @@ function demoData() {
 }
 
 function boot(rawItems, media, hasMedia, report) {
+  const tb = performance.now();
   if (S.media) S.media.release();
   S.items = finalize(rawItems);
   S.media = media || new MediaStore();
@@ -1394,6 +1442,7 @@ function boot(rawItems, media, hasMedia, report) {
   $('#btn-reset').classList.remove('hidden');
   $('#btn-report').classList.toggle('hidden', !S.report.length);
   renderAll();
+  logEvent('affichage prêt en ' + Math.round(performance.now() - tb) + ' ms : ' + S.items.length + ' éléments', countsByType());
   toast(fmtNum(S.items.length) + ' éléments chargés');
 }
 
@@ -2291,6 +2340,18 @@ function renderReport() {
 }
 
 $('#btn-report').addEventListener('click', () => { renderReport(); $('#dlg-report').showModal(); });
+$('#btn-log').addEventListener('click', () => {
+  logEvent('journal ouvert');
+  const out = $('#log-out');
+  out.value = LOG.join('\n');
+  $('#dlg-log').showModal();
+  out.scrollTop = out.scrollHeight;
+});
+$('#log-copy').addEventListener('click', async () => {
+  const txt = logText();
+  try { await navigator.clipboard.writeText(txt); toast('Journal copié'); }
+  catch (e) { $('#log-out').select(); try { document.execCommand('copy'); toast('Journal copié'); } catch (e2) { toast('Copie refusée : sélectionnez le texte à la main'); } }
+});
 $('#report-copy').addEventListener('click', async () => {
   const txt = reportText();
   try { await navigator.clipboard.writeText(txt); toast('Rapport copié'); }
@@ -2466,7 +2527,7 @@ document.addEventListener('keydown', e => {
     }
     return;
   }
-  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target.tagName || '')) || $('#dlg-export').open || $('#dlg-help').open;
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target.tagName || '')) || $('#dlg-export').open || $('#dlg-help').open || $('#dlg-log').open || $('#dlg-report').open || $('#dlg-prev').open;
   if (typing) return;
   if (e.key === '/') { e.preventDefault(); $('#q').focus(); return; }
   if (e.key.toLowerCase() === 't' && !$('#screen-app').classList.contains('hidden')) { e.preventDefault(); openFocus(); return; }
@@ -2483,28 +2544,55 @@ const dz = $('#dropzone');
   if (ev === 'dragleave' && dz.contains(e.relatedTarget)) return;
   dz.classList.remove('over');
 }));
+let dragLogged = false;
+dz.addEventListener('dragenter', () => { if (!dragLogged) { dragLogged = true; logEvent('glisser-déposer : entrée dans la zone'); } });
 dz.addEventListener('drop', async e => {
   const files = e.dataTransfer && e.dataTransfer.files;
+  logEvent('glisser-déposer : ' + (files ? files.length : 0) + ' fichier(s)');
   if (!files || !files.length) { status('Le dépôt n\'a transmis aucun fichier. Utilisez le bouton « Choisir l\'archive ».', 'error'); return; }
   try { await importAny(files); }
   catch (err) { status('Erreur de lecture : ' + esc(err && err.message || err), 'error'); }
 });
 
-$('#pick-zip').addEventListener('click', () => $('#file-zip').click());
-$('#pick-folder').addEventListener('click', () => $('#file-folder').click());
+/* Sous certains bureaux, la boîte de sélection de fichier peut ne jamais
+   s'ouvrir. Si rien ne revient dans les 20 s, on le dit et on propose le
+   glisser-déposer, qui ne passe pas par cette boîte. */
+let dialogWatch = null;
+function armDialogWatch(label) {
+  clearTimeout(dialogWatch);
+  dialogWatch = setTimeout(() => {
+    logEvent('aucune réponse de la boîte « ' + label + ' » après 20 s');
+    status('La boîte de sélection de fichier ne semble pas avoir répondu. Essayez de <b>glisser l\'archive</b> ' +
+      'depuis votre gestionnaire de fichiers directement sur cette zone, ce qui ne passe pas par cette boîte.', 'error');
+  }, 20000);
+}
+function dialogAnswered(label, n) {
+  clearTimeout(dialogWatch);
+  logEvent('boîte « ' + label + ' » : ' + (n ? n + ' fichier(s) choisi(s)' : 'fermée sans fichier'));
+  if (!n) status('Aucun fichier choisi. Vous pouvez aussi glisser l\'archive sur cette zone.');
+}
+$('#pick-zip').addEventListener('click', () => { logEvent('clic : Choisir l\'archive'); armDialogWatch('archive'); $('#file-zip').click(); });
+$('#pick-folder').addEventListener('click', () => { logEvent('clic : Choisir le dossier'); armDialogWatch('dossier'); $('#file-folder').click(); });
+$('#file-zip').addEventListener('cancel', () => dialogAnswered('archive', 0));
+$('#file-folder').addEventListener('cancel', () => dialogAnswered('dossier', 0));
+window.addEventListener('focus', () => { if (dialogWatch) setTimeout(() => { if (dialogWatch) { clearTimeout(dialogWatch); dialogWatch = null; logEvent('fenêtre réactivée sans fichier reçu'); } }, 1500); });
 $('#file-zip').addEventListener('change', async e => {
   const files = e.target.files;
+  dialogAnswered('archive', files.length);
+  if (!files.length) return;
   try { await importAny(files); }
   catch (err) { status('Erreur de lecture : ' + esc(err && err.message || err), 'error'); }
   e.target.value = '';
 });
 $('#file-folder').addEventListener('change', async e => {
   const files = e.target.files;
+  dialogAnswered('dossier', files.length);
+  if (!files.length) return;
   try { await importAny(files); }
   catch (err) { status('Erreur de lecture : ' + esc(err && err.message || err), 'error'); }
   e.target.value = '';
 });
-$('#pick-demo').addEventListener('click', () => boot(demoData(), new MediaStore(), false));
+$('#pick-demo').addEventListener('click', () => { logEvent('clic : exemple'); boot(demoData(), new MediaStore(), false); });
 
 /* bouton de reprise de session */
 async function renderResume() {
@@ -2557,12 +2645,14 @@ function envLine() {
 /* Une erreur inattendue ne doit jamais se traduire par « rien ne se passe ». */
 window.addEventListener('error', e => {
   const m = (e && e.message) || 'erreur inconnue';
+  logEvent('ERREUR globale : ' + m + (e && e.lineno ? ' (ligne ' + e.lineno + ')' : ''));
   status('Erreur inattendue : ' + esc(m) + '. Copiez ce message et envoyez-le.', 'error');
   toast('Erreur : ' + m);
 });
 window.addEventListener('unhandledrejection', e => {
   const r = e && e.reason;
   const m = (r && r.message) || String(r || 'erreur inconnue');
+  logEvent('ERREUR promesse : ' + m);
   status('Erreur inattendue : ' + esc(m) + '. Copiez ce message et envoyez-le.', 'error');
   toast('Erreur : ' + m);
 });
@@ -2570,6 +2660,8 @@ window.addEventListener('unhandledrejection', e => {
 /* ------------------------------- démarrage ----------------------------- */
 window.__appStarted = true;
 (function () { const b = $('#boot'); if (b) b.style.display = 'none'; })();
+logEvent('script démarré', { version: APP_VERSION, protocole: location.protocol, intégré: EMBEDDED,
+  decompression: typeof DecompressionStream !== 'undefined', baseLocale: !!window.indexedDB });
 if ($('#ver')) $('#ver').textContent = APP_VERSION;
 envLine();
 /* Le travail sur la base locale attend le premier affichage. */
