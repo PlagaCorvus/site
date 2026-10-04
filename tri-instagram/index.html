@@ -351,6 +351,17 @@ ul.plain li{margin-bottom:6px}
     <p id="import-status" style="margin-top:14px"></p>
   </div>
 
+  <div id="serve-box" class="hidden" style="margin-top:16px;padding:14px 16px;background:var(--bg-2);border:1px solid var(--line);border-radius:12px">
+    <div style="font-size:14px"><b>Archives dans ce dossier</b>
+      <span style="color:var(--txt-2)"> · ouvertes directement par le serveur local, sans boîte de sélection</span></div>
+    <div id="serve-list" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"></div>
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+      <input type="text" id="serve-url" placeholder="ou le nom exact du fichier, ex. instagram-export.zip" style="flex:1;min-width:220px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:inherit;font-size:14px">
+      <button class="btn" id="serve-go">Ouvrir</button>
+    </div>
+    <p id="serve-status" style="margin:10px 0 0;font-size:13px;color:var(--txt-2)"></p>
+  </div>
+
   <div class="steps">
     <div class="step"><div class="n">1</div><h3>Demandez vos données</h3>
       <p>Instagram → Paramètres → Centre de comptes → Vos informations → Télécharger vos informations. Choisissez le format <b>JSON</b>.</p></div>
@@ -520,6 +531,13 @@ ul.plain li{margin-bottom:6px}
       <li>Format : <b>JSON</b> (pas HTML). Qualité des médias : au choix.</li>
       <li>Vous recevez un e-mail avec un lien de téléchargement. Gardez le .zip tel quel.</li>
     </ul>
+    <h4 style="margin:18px 0 8px">Si la boîte de sélection de fichier ne fonctionne pas</h4>
+    <ul class="plain">
+      <li>Dans un terminal, placez-vous dans le dossier qui contient ce fichier et l'archive, puis lancez <code>python3 -m http.server 8765</code>.</li>
+      <li>Dans le navigateur, ouvrez <code>http://localhost:8765/</code> et cliquez sur ce fichier.</li>
+      <li>La page liste alors les archives du dossier et les ouvre d'un clic. Le serveur ne fait que lire, reste sur votre machine, et s'arrête avec Ctrl+C.</li>
+    </ul>
+
     <h4 style="margin:18px 0 8px">Trier</h4>
     <ul class="plain">
       <li><b>Mode tri rapide</b> : un élément à la fois, au clavier. Le plus efficace pour de gros volumes.</li>
@@ -574,7 +592,7 @@ const TYPES = [
 ];
 const TYPE_LABEL = Object.fromEntries(TYPES.map(t => [t.key, t.label]));
 const DEC_LABEL = { keep:'Gardé', remove:'À retirer', later:'Plus tard' };
-const APP_VERSION = '2.4';
+const APP_VERSION = '2.5';
 const LS_DEC = 'tri-ig:decisions';
 const ARCHIVE_EXT = /\.(zip|rar|7z|gz|tgz|tar|bz2|xz)$/i;
 const LS_SNAP = 'tri-ig:snapshot';
@@ -1391,6 +1409,66 @@ async function importArchives(zips, loose) {
     return;
   }
   boot(all, media, media.byPath.size > 0, report);
+}
+
+/* Lecture d'une archive par son adresse, quand la page est servie par un
+   serveur local : aucune boîte de dialogue n'intervient. */
+async function importFromUrl(url) {
+  const name = decodeURIComponent(String(url).split('/').pop().split('?')[0]) || 'archive.zip';
+  const st = $('#serve-status');
+  const say = m => { if (st) st.textContent = m; };
+  logEvent('ouverture par adresse : ' + url);
+  say('Téléchargement de ' + name + '…');
+  let resp;
+  try { resp = await fetch(url, { cache: 'no-store' }); }
+  catch (err) { say('Impossible de joindre ' + name + ' : ' + (err && err.message)); logEvent('adresse injoignable : ' + (err && err.message)); return; }
+  if (!resp.ok) { say('Le serveur répond ' + resp.status + ' pour ' + name + '. Vérifiez le nom exact.'); logEvent('adresse en erreur ' + resp.status); return; }
+  const total = Number(resp.headers.get('content-length')) || 0;
+  const chunks = [];
+  let got = 0;
+  if (resp.body && resp.body.getReader) {
+    const reader = resp.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      got += value.byteLength;
+      say('Téléchargement de ' + name + ' : ' + fmtBytes(got) + (total ? ' / ' + fmtBytes(total) : ''));
+    }
+  } else {
+    chunks.push(new Uint8Array(await resp.arrayBuffer()));
+  }
+  const blob = new Blob(chunks);
+  logEvent('adresse lue : ' + fmtBytes(blob.size));
+  say('Reçu ' + fmtBytes(blob.size) + '. Analyse…');
+  await importAny([new File([blob], name)]);
+}
+
+async function listServedArchives() {
+  const box = $('#serve-box');
+  if (!box || EMBEDDED || !/^https?:$/.test(location.protocol)) return;
+  box.classList.remove('hidden');
+  const list = $('#serve-list');
+  const dir = new URL('./', location.href);
+  let html = '';
+  try {
+    const txt = await (await fetch(dir.href, { cache: 'no-store' })).text();
+    const doc = new DOMParser().parseFromString(txt, 'text/html');
+    const names = Array.from(doc.querySelectorAll('a[href]'))
+      .map(a => a.getAttribute('href'))
+      .filter(h => /\.zip$/i.test(h) && !/\//.test(h.replace(/^\.\//, '')))
+      .map(h => decodeURIComponent(h));
+    logEvent('dossier servi : ' + names.length + ' archive(s)', names.slice(0, 10));
+    if (!names.length) {
+      list.innerHTML = '<span style="color:var(--txt-2);font-size:13px">Aucune archive .zip dans ce dossier. Placez l\'archive Instagram à côté de ce fichier.</span>';
+      return;
+    }
+    html = names.map(n => '<button class="btn" data-serve="' + esc(n) + '">▶ ' + esc(n) + '</button>').join('');
+    list.innerHTML = html;
+  } catch (err) {
+    logEvent('dossier servi : liste indisponible (' + (err && err.message) + ')');
+    list.innerHTML = '<span style="color:var(--txt-2);font-size:13px">Liste du dossier indisponible : tapez le nom du fichier ci-dessous.</span>';
+  }
 }
 
 /* Anciens points d'entrée, conservés pour compatibilité. */
@@ -2609,6 +2687,16 @@ $('#file-folder').addEventListener('change', async e => {
   e.target.value = '';
 });
 $('#pick-demo').addEventListener('click', () => { logEvent('clic : exemple'); boot(demoData(), new MediaStore(), false, [], { demo: true }); });
+$('#serve-list').addEventListener('click', e => {
+  const b = e.target.closest('[data-serve]');
+  if (b) importFromUrl(new URL(b.dataset.serve, location.href).href);
+});
+$('#serve-go').addEventListener('click', () => {
+  const v = $('#serve-url').value.trim();
+  if (!v) { $('#serve-status').textContent = 'Indiquez un nom de fichier.'; return; }
+  importFromUrl(/^https?:/i.test(v) ? v : new URL(v, location.href).href);
+});
+$('#serve-url').addEventListener('keydown', e => { if (e.key === 'Enter') $('#serve-go').click(); });
 
 /* bouton de reprise de session */
 async function renderResume() {
@@ -2718,6 +2806,7 @@ envLine();
 setTimeout(() => { try { mergeDecisionsFromIdb(); } catch (e) {} }, 60);
 paintPrevBtn();
 setTimeout(() => { try { renderResume(); } catch (e) {} }, 80);
+setTimeout(() => { try { listServedArchives(); } catch (e) {} }, 100);
 window.addEventListener('beforeunload', () => { try { localStorage.setItem(LS_DEC, JSON.stringify(S.decisions)); } catch (e) {} });
 </script>
 </body>
