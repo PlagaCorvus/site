@@ -150,6 +150,30 @@ select.sel{background:var(--bg-2);border:1px solid var(--line);border-radius:10p
 .card-acts button.on.drop{color:var(--drop);background:#2a1112}
 .card-acts button.on.later{color:var(--later);background:#0d1d33}
 
+/* ---------- mur d'aperçus ---------- */
+.grid.wall{grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+.wcard{background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column}
+.wcard.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.wcard.d-keep{border-left:3px solid var(--keep)}
+.wcard.d-drop{border-left:3px solid var(--drop);opacity:.6}
+.wcard.d-later{border-left:3px solid var(--later)}
+.wframe{position:relative;height:420px;background:#fff;display:grid;place-items:center}
+.wframe iframe{width:100%;height:100%;border:0;display:block}
+.wframe .ph{color:#999;font-size:13px;text-align:center;padding:0 16px;line-height:1.5}
+.wmeta{padding:9px 11px;display:flex;gap:8px;align-items:center;min-width:0;border-top:1px solid var(--line);cursor:pointer}
+.wmeta .t{flex:1;min-width:0;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wmeta .d{font-size:11.5px;color:var(--txt-2);white-space:nowrap}
+.wacts{display:flex;border-top:1px solid var(--line)}
+.wacts button{flex:1;padding:10px 0;font-size:14px;font-weight:700;color:var(--txt-2);border-right:1px solid var(--line)}
+.wacts button:last-child{border-right:none}
+.wacts button:hover{background:var(--bg-3);color:var(--txt)}
+.wacts button.on.keep{color:var(--keep);background:#0f2314}
+.wacts button.on.drop{color:var(--drop);background:#2a1112}
+.wacts button.on.later{color:var(--later);background:#0d1d33}
+.wnote{grid-column:1/-1;background:var(--bg-2);border:1px solid var(--line);border-radius:12px;
+  padding:11px 14px;font-size:13px;color:var(--txt-2);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.more{grid-column:1/-1;display:flex;justify-content:center;padding:14px 0 28px}
+
 /* ---------- liste compacte (éléments sans image) ---------- */
 .grid.list{grid-template-columns:repeat(auto-fill,minmax(310px,1fr))}
 .row{display:flex;flex-direction:row;align-items:center;gap:11px;padding:9px 11px}
@@ -1531,9 +1555,10 @@ async function loadThumb(el) {
 
 /* Lecteur public d'Instagram : même mécanisme que l'intégration d'une
    publication sur un site. Ne fonctionne que pour les comptes publics. */
-function embedUrl(it) {
+function embedUrl(it, compact) {
   const m = String(it.href || '').match(/instagram\.com\/(?:p|reel|reels|tv)\/([A-Za-z0-9_-]+)/);
-  return m ? 'https://www.instagram.com/p/' + m[1] + '/embed/captioned/' : null;
+  if (!m) return null;
+  return 'https://www.instagram.com/p/' + m[1] + (compact ? '/embed/' : '/embed/captioned/');
 }
 
 function avatarFor(name, cls) {
@@ -1558,8 +1583,7 @@ function relBadge(it) {
 }
 
 function decButtons(it, dec, cls) {
-  const eye = (S.previews && embedUrl(it)) ? '<button data-see="1" title="Voir la publication">👁</button>' : '';
-  return '<div class="' + cls + '">' + eye +
+  return '<div class="' + cls + '">' +
     '<button data-dec="remove" class="' + (dec === 'remove' ? 'on drop' : '') + '" title="À retirer">✕</button>' +
     '<button data-dec="later" class="' + (dec === 'later' ? 'on later' : '') + '" title="Plus tard">★</button>' +
     '<button data-dec="keep" class="' + (dec === 'keep' ? 'on keep' : '') + '" title="Garder">✓</button>' +
@@ -1585,6 +1609,25 @@ function rowHTML(it) {
     '<div class="row-main"><div class="row-title">' + title + '</div>' +
     '<div class="row-meta">' + (badge ? badge + ' ' : '') + meta.join(' · ') + '</div></div>' +
     decButtons(it, dec, 'row-acts') + '</div>';
+}
+
+const PAGE_WALL = 24;
+
+function wallHTML(it) {
+  const dec = S.decisions[it.id] || null;
+  const sel = S.selection.has(it.id);
+  const emb = embedUrl(it, true);
+  const name = it.user ? '@' + it.user : (it.collections && it.collections[0]) || 'Publication';
+  const title = it.href
+    ? '<a href="' + esc(it.href) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">' + esc(name) + ' ↗</a>'
+    : esc(name);
+  return '<div class="wcard' + (dec ? ' d-' + (dec === 'remove' ? 'drop' : dec) : '') + (sel ? ' sel' : '') +
+    '" data-id="' + it.id + '">' +
+    '<div class="wframe" data-embed="' + esc(emb || '') + '">' +
+      '<span class="ph">Chargement de l\'aperçu…</span></div>' +
+    '<div class="wmeta pick"><span class="t">' + title + '</span>' +
+      '<span class="d">' + (it.ts ? fmtDate(it.ts) : '') + '</span></div>' +
+    decButtons(it, dec, 'wacts') + '</div>';
 }
 
 function cardHTML(it) {
@@ -1625,14 +1668,18 @@ function hasThumbs(list) {
   }
   return false;
 }
-function itemHTML(it) { return listMode ? rowHTML(it) : cardHTML(it); }
+let wallMode = false;
+function itemHTML(it) { return wallMode ? wallHTML(it) : (listMode ? rowHTML(it) : cardHTML(it)); }
+function pageSize() { return wallMode ? PAGE_WALL : PAGE; }
 
 function renderGrid() {
   currentList = visibleItems();
   listMode = !hasThumbs(currentList);
+  wallMode = S.previews && listMode && currentList.some(it => embedUrl(it));
   S.page = 1;
   const grid = $('#grid');
-  grid.classList.toggle('list', listMode);
+  grid.classList.toggle('list', listMode && !wallMode);
+  grid.classList.toggle('wall', wallMode);
   if (!currentList.length) {
     grid.innerHTML = '<div class="empty" style="grid-column:1/-1"><div class="ico">✓</div>' +
       '<p><b>Rien à afficher ici.</b></p><p style="font-size:14px">' +
@@ -1641,29 +1688,63 @@ function renderGrid() {
     renderSelBar();
     return;
   }
-  grid.innerHTML = currentList.slice(0, PAGE).map(itemHTML).join('') + sentinel();
+  const banner = wallMode
+    ? '<div class="wnote"><span>Aperçus chargés depuis instagram.com, seulement pour les cartes visibles. ' +
+      'Un cadre resté vide signale une publication privée ou supprimée : le lien reste cliquable.</span></div>'
+    : '';
+  grid.innerHTML = banner + currentList.slice(0, pageSize()).map(itemHTML).join('') + sentinel();
   hydrate(grid);
   renderSelBar();
 }
 
 function sentinel() {
-  return currentList.length > S.page * PAGE
-    ? '<div id="sentinel" style="grid-column:1/-1;text-align:center;padding:18px;color:var(--txt-2);font-size:14px">Chargement…</div>'
-    : '<div style="grid-column:1/-1;text-align:center;padding:18px;color:var(--txt-2);font-size:13px">' + fmtNum(currentList.length) + ' élément(s)</div>';
+  const shown = Math.min(S.page * pageSize(), currentList.length);
+  if (currentList.length <= shown) {
+    return '<div style="grid-column:1/-1;text-align:center;padding:18px;color:var(--txt-2);font-size:13px">' +
+      fmtNum(currentList.length) + ' élément(s)</div>';
+  }
+  if (wallMode) {
+    return '<div class="more"><button class="btn" id="more-btn">Afficher ' +
+      fmtNum(Math.min(PAGE_WALL, currentList.length - shown)) + ' aperçus de plus · ' +
+      fmtNum(shown) + ' sur ' + fmtNum(currentList.length) + '</button></div>';
+  }
+  return '<div id="sentinel" style="grid-column:1/-1;text-align:center;padding:18px;color:var(--txt-2);font-size:14px">Chargement…</div>';
 }
 
 function appendPage() {
   const grid = $('#grid');
   const old = $('#sentinel');
   if (old) old.remove();
-  const start = S.page * PAGE;
+  const start = S.page * pageSize();
   S.page++;
-  const slice = currentList.slice(start, S.page * PAGE);
+  const slice = currentList.slice(start, S.page * pageSize());
   const frag = document.createElement('div');
   frag.innerHTML = slice.map(itemHTML).join('');
   while (frag.firstChild) grid.appendChild(frag.firstChild);
   grid.insertAdjacentHTML('beforeend', sentinel());
   hydrate(grid);
+}
+
+const frameObserver = new IntersectionObserver(entries => {
+  for (const en of entries) {
+    if (!en.isIntersecting) continue;
+    frameObserver.unobserve(en.target);
+    loadFrame(en.target);
+  }
+}, { rootMargin: '300px 0px' });
+
+function loadFrame(el) {
+  const src = el.dataset.embed;
+  if (!src || el.dataset.loaded) return;
+  el.dataset.loaded = '1';
+  const f = document.createElement('iframe');
+  f.src = src;
+  f.loading = 'lazy';
+  f.title = 'Publication Instagram';
+  f.setAttribute('referrerpolicy', 'origin-when-cross-origin');
+  f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox');
+  el.textContent = '';
+  el.appendChild(f);
 }
 
 function hydrate(root) {
@@ -1672,8 +1753,15 @@ function hydrate(root) {
     el.dataset.obs = '1';
     thumbObserver.observe(el);
   });
+  $$('.wframe[data-embed]:not([data-embed=""])', root).forEach(el => {
+    if (el.dataset.obs) return;
+    el.dataset.obs = '1';
+    frameObserver.observe(el);
+  });
   const sent = $('#sentinel');
   if (sent) pageObserver.observe(sent);
+  const more = $('#more-btn');
+  if (more) more.addEventListener('click', appendPage);
 }
 
 const pageObserver = new IntersectionObserver(entries => {
@@ -2069,7 +2157,7 @@ $('#chips').addEventListener('click', e => {
 });
 
 $('#grid').addEventListener('click', e => {
-  const card = e.target.closest('.card');
+  const card = e.target.closest('.card, .wcard');
   if (!card) return;
   const id = card.dataset.id;
   const btn = e.target.closest('[data-dec]');
@@ -2077,7 +2165,6 @@ $('#grid').addEventListener('click', e => {
     decide(id, btn.dataset.dec);
     return;
   }
-  if (e.target.closest('[data-see]')) { openFocus(id); return; }
   if (e.target.closest('a')) return;
   if (e.target.closest('.pick') || e.target.closest('.row-main')) {
     if (S.selection.has(id)) S.selection.delete(id); else S.selection.add(id);
