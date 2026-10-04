@@ -747,6 +747,84 @@ function pickLinks(entry) {
 }
 
 const POST_LINK = /\/(p|reel|reels|tv|s)\//;
+const HANDLE = /^[A-Za-z0-9._]{1,30}$/;
+const USER_LABEL = /utilisateur|username|auteur|author|compte|account|profil|owner/i;
+
+/* Format récent des exports Meta : chaque entrée porte un tableau
+   label_values, parfois imbriqué (vec, dict), au lieu de string_map_data.
+   Les étiquettes sont traduites dans la langue du compte, donc on ne se
+   fie pas à leur texte : on récolte liens, valeurs et dates où qu'ils soient. */
+function deepFields(node, out, depth) {
+  out = out || { hrefs: [], values: [], ts: [] };
+  const d = depth || 0;
+  if (!node || typeof node !== 'object' || d > 7) return out;
+  if (Array.isArray(node)) {
+    for (const v of node) deepFields(v, out, d + 1);
+    return out;
+  }
+  const label = typeof node.label === 'string' ? node.label : '';
+  for (const k of Object.keys(node)) {
+    const v = node[k];
+    if (v === null || v === undefined) continue;
+    if (typeof v === 'string') {
+      if (/^https?:\/\//i.test(v)) out.hrefs.push({ href: v, label });
+      else if (k === 'value' || k === 'title' || k === 'name') out.values.push({ value: v, label });
+    } else if (typeof v === 'number') {
+      if (/time|timestamp/i.test(k) && v > 1000000000 && v < 4000000000) out.ts.push(v);
+    } else if (typeof v === 'object') {
+      deepFields(v, out, d + 1);
+    }
+  }
+  return out;
+}
+
+/* Identifiant de média Instagram vers code court de permalien. */
+function idToShortcode(id) {
+  const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  if (!/^\d{10,25}$/.test(String(id || ''))) return '';
+  let n;
+  try { n = BigInt(id); } catch (e) { return ''; }
+  let out = '';
+  while (n > 0n) { out = A[Number(n % 64n)] + out; n = n / 64n; }
+  return out.length >= 8 ? out : '';
+}
+
+/* Lit une entrée quelle que soit sa forme. Renvoie null si rien d'exploitable. */
+function readEntry(e, type) {
+  const f = deepFields(e);
+  const post = f.hrefs.find(h => POST_LINK.test(h.href));
+  const profile = f.hrefs.find(h => /instagram\.com\/[A-Za-z0-9._]+\/?$/.test(h.href));
+  const named = f.values.find(v => USER_LABEL.test(v.label) && HANDLE.test(v.value));
+  const handle = named || f.values.find(v => HANDLE.test(v.value) && !/^\d+$/.test(v.value));
+  let user = fixText((handle && handle.value) || e.title || '');
+  if (!user && profile) {
+    const m = profile.href.match(/instagram\.com\/([A-Za-z0-9._]+)/);
+    if (m) user = m[1];
+  }
+  const caption = f.values.find(v => v.value && !HANDLE.test(v.value));
+  const ts = e.timestamp || f.ts[0] || 0;
+
+  let href = post ? post.href : '';
+  let guessed = false;
+  if (!href) {
+    const code = idToShortcode(e.fbid || e.media_id || e.pk);
+    if (code) { href = 'https://www.instagram.com/p/' + code + '/'; guessed = true; }
+  }
+  if (!href && profile) href = profile.href;
+  if (!href && user) href = profileUrl(user);
+  if (!href && !user) return null;
+
+  return {
+    type,
+    title: user || (caption ? fixText(caption.value) : '') || href,
+    user,
+    href,
+    ts,
+    uris: [],
+    guessed,
+    caption: caption ? fixText(caption.value) : '',
+  };
+}
 
 function parseRelations(entries, type) {
   const out = [];
@@ -763,6 +841,12 @@ function parseRelations(entries, type) {
       out.push({ type, title: name || d.href, user: name, href: d.href || profileUrl(name), ts: d.timestamp || 0, uris: [] });
     }
   }
+  if (!out.length) {
+    for (const e of entries) {
+      const got = readEntry(e, type);
+      if (got) out.push(got);
+    }
+  }
   return out;
 }
 
@@ -770,12 +854,15 @@ function parseSaved(entries) {
   const out = [];
   for (const e of entries) {
     const links = pickLinks(e);
-    const post = links.find(d => d.href && POST_LINK.test(d.href)) || links.find(d => d.href) || {};
-    const user = fixText(e.title || post.value || '');
-    const href = post.href || profileUrl(user);
-    const ts = post.timestamp || links.map(d => d.timestamp).find(Boolean) || e.timestamp || 0;
-    if (!href && !user) continue;
-    out.push({ type: 'saved', title: user || href, user, href, ts, uris: [] });
+    const post = links.find(d => d.href && POST_LINK.test(d.href)) || links.find(d => d.href);
+    if (post) {
+      const user = fixText(e.title || post.value || '');
+      const ts = post.timestamp || links.map(d => d.timestamp).find(Boolean) || e.timestamp || 0;
+      out.push({ type: 'saved', title: user || post.href, user, href: post.href, ts, uris: [] });
+      continue;
+    }
+    const got = readEntry(e, 'saved');
+    if (got) out.push(got);
   }
   return out;
 }
@@ -784,22 +871,19 @@ function parseSaved(entries) {
    entrée est soit une collection, soit une publication rangée dedans. */
 function parseSavedCollections(entries) {
   const out = [];
+  const seen = new Set();
   for (const e of entries) {
     const map = e.string_map_data || {};
-    const list = Array.isArray(e.string_list_data) ? e.string_list_data : [];
-    const collection = fixText((map.Name && map.Name.value) || e.title || '');
-    const candidates = list.length ? list : Object.values(map);
-    for (const d of candidates) {
-      const href = d && d.href;
-      if (!href || !/\/(p|reel|reels|tv)\//.test(href)) continue;
+    const f = deepFields(e);
+    const named = f.values.find(v => /nom|name|titre|title|collection/i.test(v.label)) || f.values[0];
+    const collection = fixText((map.Name && map.Name.value) || e.title || (named && named.value) || '');
+    const posts = f.hrefs.filter(h => POST_LINK.test(h.href));
+    for (const h of posts) {
+      if (seen.has(h.href)) continue;
+      seen.add(h.href);
       out.push({
-        type: 'saved',
-        title: collection || fixText(d.value || ''),
-        user: fixText(d.value || ''),
-        href,
-        ts: d.timestamp || 0,
-        uris: [],
-        collection: collection || '',
+        type: 'saved', title: collection || h.href, user: '', href: h.href,
+        ts: e.timestamp || f.ts[0] || 0, uris: [], collection: collection || '',
       });
     }
   }
@@ -810,12 +894,15 @@ function parseLiked(entries) {
   const out = [];
   for (const e of entries) {
     const links = pickLinks(e);
-    const post = links.find(d => d.href && POST_LINK.test(d.href)) || links.find(d => d.href) || {};
-    const user = fixText(e.title || post.value || '');
-    const href = post.href || profileUrl(user);
-    const ts = post.timestamp || links.map(d => d.timestamp).find(Boolean) || 0;
-    if (!href && !user) continue;
-    out.push({ type: 'liked', title: user || href, user, href, ts, uris: [] });
+    const post = links.find(d => d.href && POST_LINK.test(d.href)) || links.find(d => d.href);
+    if (post) {
+      const user = fixText(e.title || post.value || '');
+      const ts = post.timestamp || links.map(d => d.timestamp).find(Boolean) || 0;
+      out.push({ type: 'liked', title: user || post.href, user, href: post.href, ts, uris: [] });
+      continue;
+    }
+    const got = readEntry(e, 'liked');
+    if (got) out.push(got);
   }
   return out;
 }
@@ -1393,14 +1480,17 @@ function avatarFor(name, cls) {
 }
 
 function relBadge(it) {
-  if (it.type !== 'following' && it.type !== 'follower') return '';
+  const guess = it.guessed
+    ? '<span class="badge warn" title="Lien déduit de l\'identifiant : l\'export ne contenait pas d\'adresse">lien reconstruit</span>'
+    : '';
+  if (it.type !== 'following' && it.type !== 'follower') return guess;
   const { followers, following, norm } = mutualSets();
   const u = norm(it.user);
-  if (!u) return '';
+  if (!u) return guess;
   const f = followers.has(u), g = following.has(u);
-  if (f && g) return '<span class="badge ok">réciproque</span>';
-  if (it.type === 'following') return '<span class="badge warn">ne vous suit pas</span>';
-  return '<span class="badge warn">non suivi</span>';
+  if (f && g) return guess + '<span class="badge ok">réciproque</span>';
+  if (it.type === 'following') return guess + '<span class="badge warn">ne vous suit pas</span>';
+  return guess + '<span class="badge warn">non suivi</span>';
 }
 
 function decButtons(it, dec, cls) {
@@ -1443,6 +1533,7 @@ function cardHTML(it) {
   const meta = [];
   if (it.ts) meta.push(fmtDate(it.ts));
   if (dec) meta.push('<span style="color:var(--' + (dec === 'keep' ? 'keep' : dec === 'remove' ? 'drop' : 'later') + ')">' + DEC_LABEL[dec] + '</span>');
+  if (it.guessed) meta.push('<span class="badge warn" style="margin:0">lien reconstruit</span>');
   const titleTxt = it.user ? '@' + it.user : (it.title || '(sans titre)');
   const title = it.href
     ? '<a href="' + esc(it.href) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">' + esc(titleTxt) + ' ↗</a>'
