@@ -5,6 +5,23 @@ Application web pour trier sa bibliothèque Instagram : publications, enregistre
 
 **En ligne :** [`tri-instagram/`](https://plagacorvus.github.io/site/tri-instagram/)
 
+## Démarrage recommandé : le lanceur
+
+Le fichier `lanceur.py` contient la page et un petit serveur local. Il ne dépend que de
+Python 3, présent sur Linux et macOS. Il choisit lui-même un port libre, trouve les
+archives `.zip` dans Téléchargements, Downloads, Bureau, le dossier courant et ceux passés
+en argument, sert la page et ouvre le navigateur par défaut.
+
+```
+python3 lanceur.py
+```
+
+La page liste alors les archives et les ouvre d'un clic, sans boîte de sélection de
+fichier, ce qui contourne un sélecteur de bureau défaillant. Ctrl+C arrête le serveur.
+Options : `--port N`, `--no-browser`, et des chemins de dossiers ou d'archives.
+
+`lanceur.py` est régénéré depuis `index.html` par `python3 construire.py`.
+
 ## Ce qu'elle fait
 
 - Lit l'archive de données Instagram (format JSON), au choix le `.zip` tel quel ou le dossier décompressé.
