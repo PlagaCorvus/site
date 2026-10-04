@@ -1,0 +1,1639 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tri Instagram — Plaga Corvus</title>
+<meta name="description" content="Application locale pour trier facilement sa bibliothèque Instagram : publications, enregistrements, j'aime, abonnements. Tout reste sur votre appareil.">
+<style>
+:root{
+  --bg:#0b0b0d;
+  --bg-2:#141418;
+  --bg-3:#1c1c22;
+  --line:#2a2a33;
+  --txt:#f2f2f4;
+  --txt-2:#a0a0ad;
+  --accent:#f0b429;
+  --keep:#3fb950;
+  --drop:#f85149;
+  --later:#58a6ff;
+  --radius:14px;
+  --shadow:0 10px 30px rgba(0,0,0,.45);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--bg);color:var(--txt);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased;
+}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:none;background:none}
+a{color:var(--accent)}
+.wrap{max-width:1180px;margin:0 auto;padding:0 16px}
+
+/* ---------- top bar ---------- */
+.topbar{
+  position:sticky;top:0;z-index:50;background:rgba(11,11,13,.92);
+  backdrop-filter:blur(10px);border-bottom:1px solid var(--line);
+}
+.topbar-in{display:flex;align-items:center;gap:12px;height:60px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.2px;flex-shrink:0;white-space:nowrap}
+.brand .dot{width:10px;height:10px;border-radius:50%;background:var(--accent)}
+.brand small{display:block;font-weight:400;font-size:12px;color:var(--txt-2);letter-spacing:0}
+.spacer{flex:1}
+.btn{
+  display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:10px;
+  background:var(--bg-3);border:1px solid var(--line);color:var(--txt);font-size:14px;font-weight:600;
+  transition:background .15s,border-color .15s,transform .05s;white-space:nowrap;
+}
+.btn:hover{background:#262630;border-color:#3a3a46}
+.btn:active{transform:translateY(1px)}
+.btn.primary{background:var(--accent);color:#1b1500;border-color:var(--accent)}
+.btn.primary:hover{background:#ffc53d}
+.btn.ghost{background:transparent}
+.btn.sm{padding:6px 10px;font-size:13px;border-radius:8px}
+.btn[disabled]{opacity:.4;cursor:not-allowed}
+
+/* ---------- import ---------- */
+.hero{padding:40px 0 10px;text-align:center}
+.hero h1{font-size:30px;margin:0 0 8px;letter-spacing:-.3px}
+.hero p{margin:0 auto 22px;max-width:640px;color:var(--txt-2)}
+.drop{
+  border:2px dashed #35353f;border-radius:18px;padding:34px 20px;text-align:center;
+  background:var(--bg-2);transition:border-color .15s,background .15s;
+}
+.drop.over{border-color:var(--accent);background:#1b1708}
+.drop h2{margin:0 0 6px;font-size:19px}
+.drop p{margin:0 0 16px;color:var(--txt-2);font-size:14px}
+.drop-actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.hidden{display:none !important}
+.steps{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin:26px 0 10px}
+.step{background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius);padding:16px}
+.step .n{width:24px;height:24px;border-radius:50%;background:var(--accent);color:#1b1500;
+  display:grid;place-items:center;font-size:13px;font-weight:700;margin-bottom:8px}
+.step h3{margin:0 0 6px;font-size:15px}
+.step p{margin:0;font-size:13.5px;color:var(--txt-2)}
+.note{font-size:13px;color:var(--txt-2);text-align:center;margin:18px 0 40px}
+.badge-safe{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;
+  background:#10281a;color:#5ad67d;font-size:12.5px;font-weight:600;border:1px solid #1d4a2c}
+
+/* ---------- tabs ---------- */
+.tabs{display:flex;gap:6px;overflow-x:auto;padding:14px 0 12px;scrollbar-width:thin}
+.tab{
+  padding:8px 13px;border-radius:999px;background:var(--bg-2);border:1px solid var(--line);
+  font-size:14px;font-weight:600;color:var(--txt-2);display:flex;gap:7px;align-items:center;white-space:nowrap
+}
+.tab:hover{color:var(--txt)}
+.tab.active{background:var(--txt);color:#0b0b0d;border-color:var(--txt)}
+.tab .cnt{font-size:12px;opacity:.75;font-variant-numeric:tabular-nums}
+
+/* ---------- toolbar ---------- */
+.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding-bottom:14px}
+.search{
+  flex:1;min-width:190px;display:flex;align-items:center;gap:8px;background:var(--bg-2);
+  border:1px solid var(--line);border-radius:10px;padding:8px 12px
+}
+.search input{flex:1;background:none;border:none;outline:none;font-size:14.5px}
+.search input::placeholder{color:#6a6a78}
+select.sel{background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:9px 11px;font-size:14px;outline:none}
+.chips{display:flex;gap:6px;flex-wrap:wrap;padding-bottom:12px}
+.chip{padding:6px 11px;border-radius:999px;background:var(--bg-2);border:1px solid var(--line);
+  font-size:13px;color:var(--txt-2);font-weight:600}
+.chip.active{border-color:var(--accent);color:var(--accent);background:#1b1708}
+.chip.k-keep.active{border-color:var(--keep);color:var(--keep);background:#0f2314}
+.chip.k-drop.active{border-color:var(--drop);color:var(--drop);background:#2a1112}
+.chip.k-later.active{border-color:var(--later);color:var(--later);background:#0d1d33}
+
+/* ---------- progress ---------- */
+.progress{height:6px;border-radius:999px;background:var(--bg-3);overflow:hidden;display:flex;margin-bottom:16px}
+.progress i{display:block;height:100%}
+.progress .p-keep{background:var(--keep)}
+.progress .p-drop{background:var(--drop)}
+.progress .p-later{background:var(--later)}
+.p-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--txt-2);margin:-8px 0 16px}
+.p-legend b{color:var(--txt);font-variant-numeric:tabular-nums}
+.sw{width:9px;height:9px;border-radius:3px;display:inline-block;margin-right:6px;vertical-align:middle}
+
+/* ---------- grid ---------- */
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));padding-bottom:40px}
+.card{
+  background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
+  display:flex;flex-direction:column;position:relative;transition:border-color .15s,transform .08s
+}
+.card:hover{border-color:#3d3d49}
+.card.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.card.d-keep{border-left:3px solid var(--keep)}
+.card.d-drop{border-left:3px solid var(--drop);opacity:.72}
+.card.d-later{border-left:3px solid var(--later)}
+.thumb{aspect-ratio:1/1;background:var(--bg-3);display:grid;place-items:center;overflow:hidden;position:relative}
+.thumb img,.thumb video{width:100%;height:100%;object-fit:cover;display:block}
+.thumb .ph{font-size:30px;opacity:.3}
+.thumb .tag{position:absolute;top:7px;left:7px;background:rgba(0,0,0,.7);border-radius:6px;
+  padding:2px 7px;font-size:11px;font-weight:700;letter-spacing:.3px}
+.card-body{padding:10px 11px;display:flex;flex-direction:column;gap:5px;flex:1}
+.card-title{font-size:13.5px;font-weight:600;line-height:1.35;overflow:hidden;display:-webkit-box;
+  -webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word}
+.card-meta{font-size:11.5px;color:var(--txt-2);display:flex;gap:8px;flex-wrap:wrap;margin-top:auto}
+.card-acts{display:flex;border-top:1px solid var(--line)}
+.card-acts button{flex:1;padding:8px 0;font-size:13px;font-weight:700;color:var(--txt-2);border-right:1px solid var(--line)}
+.card-acts button:last-child{border-right:none}
+.card-acts button:hover{background:var(--bg-3);color:var(--txt)}
+.card-acts button.on.keep{color:var(--keep);background:#0f2314}
+.card-acts button.on.drop{color:var(--drop);background:#2a1112}
+.card-acts button.on.later{color:var(--later);background:#0d1d33}
+
+/* ---------- liste compacte (éléments sans image) ---------- */
+.grid.list{grid-template-columns:repeat(auto-fill,minmax(310px,1fr))}
+.row{display:flex;flex-direction:row;align-items:center;gap:11px;padding:9px 11px}
+.row .avatar{flex:0 0 auto;width:40px;height:40px;border-radius:50%;display:grid;place-items:center;
+  font-weight:700;font-size:16px;color:#0b0b0d;cursor:pointer;user-select:none;border:2px solid transparent}
+.card.sel .avatar{border-color:var(--accent)}
+.row-main{flex:1;min-width:0;cursor:pointer}
+.row-title{font-size:14.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row-meta{font-size:12px;color:var(--txt-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row-acts{display:flex;gap:2px;flex:0 0 auto}
+.row-acts button{width:32px;height:32px;border-radius:8px;font-size:13px;font-weight:700;color:var(--txt-2)}
+.row-acts button:hover{background:var(--bg-3);color:var(--txt)}
+.row-acts button.on.keep{color:var(--keep);background:#0f2314}
+.row-acts button.on.drop{color:var(--drop);background:#2a1112}
+.row-acts button.on.later{color:var(--later);background:#0d1d33}
+.badge{display:inline-block;padding:0 7px;border-radius:999px;font-size:11px;font-weight:600;
+  background:var(--bg-3);color:var(--txt-2);margin-right:5px;vertical-align:1px}
+.badge.warn{background:#2a1a08;color:#e0a53b}
+.badge.ok{background:#0f2314;color:var(--keep)}
+
+/* ---------- focus mode ---------- */
+.focus{position:fixed;inset:0;z-index:100;background:#08080a;display:flex;flex-direction:column}
+.focus-head{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.focus-body{flex:1;display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto}
+.focus-card{width:100%;max-width:560px;text-align:center}
+.focus-media{
+  width:100%;aspect-ratio:1/1;max-height:50vh;background:var(--bg-2);border:1px solid var(--line);
+  border-radius:16px;overflow:hidden;display:grid;place-items:center;margin-bottom:16px
+}
+.focus-media img,.focus-media video{width:100%;height:100%;object-fit:contain;background:#000}
+.focus-media .ph{font-size:52px;opacity:.25}
+.focus-media.ident{aspect-ratio:auto;min-height:190px;padding:26px 18px}
+.ident-box{text-align:center}
+.ident-box .avatar{width:84px;height:84px;border-radius:50%;display:grid;place-items:center;
+  font-size:34px;font-weight:700;color:#0b0b0d;margin:0 auto 12px}
+.ident-box .idname{font-size:19px;font-weight:700;word-break:break-all}
+.ident-box .idsub{font-size:13.5px;color:var(--txt-2);margin-top:4px}
+.focus-title{font-size:17px;font-weight:600;margin:0 0 6px;word-break:break-word}
+.focus-meta{font-size:13.5px;color:var(--txt-2);margin:0 0 18px}
+.focus-acts{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.big{
+  min-width:118px;padding:13px 18px;border-radius:12px;font-weight:700;font-size:15px;
+  border:1px solid var(--line);background:var(--bg-2)
+}
+.big.keep{border-color:#235c2e;color:var(--keep)}
+.big.keep:hover{background:#0f2314}
+.big.drop{border-color:#6b2224;color:var(--drop)}
+.big.drop:hover{background:#2a1112}
+.big.later{border-color:#1f4876;color:var(--later)}
+.big.later:hover{background:#0d1d33}
+.kbd{display:inline-block;min-width:18px;padding:1px 5px;border-radius:5px;background:#000;
+  border:1px solid var(--line);font-size:11px;font-family:ui-monospace,Menlo,Consolas,monospace;color:var(--txt-2)}
+.focus-foot{padding:12px 16px;border-top:1px solid var(--line);display:flex;gap:14px;
+  justify-content:center;flex-wrap:wrap;font-size:12.5px;color:var(--txt-2)}
+
+/* ---------- misc ---------- */
+.empty{text-align:center;padding:60px 20px;color:var(--txt-2)}
+.empty .ico{font-size:40px;opacity:.35;margin-bottom:10px}
+.sticky-sel{
+  position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:60;display:flex;gap:8px;align-items:center;
+  background:var(--bg-3);border:1px solid var(--line);border-radius:14px;padding:9px 12px;box-shadow:var(--shadow);flex-wrap:wrap;
+  max-width:calc(100% - 24px)
+}
+.sticky-sel b{font-variant-numeric:tabular-nums}
+dialog{
+  border:1px solid var(--line);background:var(--bg-2);color:var(--txt);border-radius:16px;
+  padding:0;max-width:720px;width:calc(100% - 32px);box-shadow:var(--shadow)
+}
+dialog::backdrop{background:rgba(0,0,0,.65)}
+.dlg-head{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)}
+.dlg-head h3{margin:0;font-size:17px}
+.dlg-body{padding:18px;max-height:65vh;overflow:auto}
+.dlg-foot{padding:14px 18px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
+textarea.out{
+  width:100%;min-height:210px;background:#000;border:1px solid var(--line);border-radius:10px;padding:12px;
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;resize:vertical;outline:none
+}
+.toast{
+  position:fixed;left:50%;transform:translateX(-50%);bottom:84px;z-index:200;background:var(--txt);color:#0b0b0d;
+  padding:10px 16px;border-radius:10px;font-size:14px;font-weight:600;box-shadow:var(--shadow);
+  opacity:0;pointer-events:none;transition:opacity .2s,bottom .2s
+}
+.toast.show{opacity:1;bottom:94px}
+.stat-row{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:16px}
+.stat{background:var(--bg-2);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.stat b{display:block;font-size:22px;font-variant-numeric:tabular-nums;line-height:1.2}
+.stat span{font-size:12.5px;color:var(--txt-2)}
+ul.plain{margin:0;padding-left:18px;color:var(--txt-2);font-size:14px}
+ul.plain li{margin-bottom:6px}
+.inline-link{color:var(--accent);text-decoration:none;font-weight:600}
+.inline-link:hover{text-decoration:underline}
+@media (max-width:640px){
+  .hero h1{font-size:24px}
+  .brand{font-size:15px}
+  .stat{padding:9px 11px}
+  .stat b{font-size:18px}
+  .topbar .btn.sm{padding:6px 9px;font-size:13px}
+  .grid.list{grid-template-columns:1fr}
+  .grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+  .topbar-in{height:56px}
+  .brand small{display:none}
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="wrap topbar-in">
+    <div class="brand"><span class="dot"></span><span>Tri Instagram<small>Tout se passe sur votre appareil</small></span></div>
+    <div class="spacer"></div>
+    <button class="btn sm ghost" id="btn-help">Aide</button>
+    <button class="btn sm ghost hidden" id="btn-reset">Recharger</button>
+    <button class="btn sm primary hidden" id="btn-export">Exporter</button>
+  </div>
+</div>
+
+<!-- ============ ÉCRAN D'IMPORT ============ -->
+<section id="screen-import" class="wrap">
+  <div class="hero">
+    <h1>Triez votre bibliothèque Instagram, tranquillement</h1>
+    <p>Chargez l'archive de vos données Instagram et passez vos publications, enregistrements, j'aime et abonnements un par un. Vous décidez : garder, retirer, ou voir plus tard.</p>
+    <span class="badge-safe">● Aucun envoi réseau, aucun mot de passe, 100 % hors ligne</span>
+  </div>
+
+  <div class="drop" id="dropzone">
+    <h2>Déposez votre archive ici</h2>
+    <p>Fichier <code>.zip</code> téléchargé depuis Instagram, ou le dossier décompressé.</p>
+    <div class="drop-actions">
+      <button class="btn primary" id="pick-zip">Choisir l'archive .zip</button>
+      <button class="btn" id="pick-folder">Choisir le dossier</button>
+      <button class="btn ghost" id="pick-demo">Essayer avec un exemple</button>
+    </div>
+    <input type="file" id="file-zip" class="hidden" accept=".zip,application/zip">
+    <input type="file" id="file-folder" class="hidden" webkitdirectory directory multiple>
+    <p id="import-status" style="margin-top:14px"></p>
+  </div>
+
+  <div class="steps">
+    <div class="step"><div class="n">1</div><h3>Demandez vos données</h3>
+      <p>Instagram → Paramètres → Centre de comptes → Vos informations → Télécharger vos informations. Choisissez le format <b>JSON</b>.</p></div>
+    <div class="step"><div class="n">2</div><h3>Récupérez l'archive</h3>
+      <p>Instagram envoie un lien par e-mail (quelques minutes à 48 h). Téléchargez le fichier .zip sans le décompresser.</p></div>
+    <div class="step"><div class="n">3</div><h3>Déposez-la ici</h3>
+      <p>Le fichier est lu dans votre navigateur. Rien n'est téléversé, rien ne sort de votre appareil.</p></div>
+    <div class="step"><div class="n">4</div><h3>Triez, puis agissez</h3>
+      <p>Marquez chaque élément, puis exportez votre liste de liens à traiter dans l'application Instagram.</p></div>
+  </div>
+  <p class="note">Vos décisions sont enregistrées dans ce navigateur : vous pouvez fermer l'onglet et reprendre plus tard.</p>
+</section>
+
+<!-- ============ ÉCRAN PRINCIPAL ============ -->
+<section id="screen-app" class="wrap hidden">
+  <div class="tabs" id="tabs"></div>
+
+  <div class="stat-row" id="stats"></div>
+
+  <div class="progress" id="progress">
+    <i class="p-keep" style="width:0"></i><i class="p-drop" style="width:0"></i><i class="p-later" style="width:0"></i>
+  </div>
+  <div class="p-legend" id="legend"></div>
+
+  <div class="toolbar">
+    <div class="search">
+      <span style="opacity:.5">⌕</span>
+      <input type="search" id="q" placeholder="Rechercher un compte, une légende…" autocomplete="off">
+    </div>
+    <select class="sel" id="sort">
+      <option value="date-desc">Plus récent d'abord</option>
+      <option value="date-asc">Plus ancien d'abord</option>
+      <option value="title-asc">Nom (A→Z)</option>
+      <option value="title-desc">Nom (Z→A)</option>
+    </select>
+    <button class="btn primary" id="btn-focus">▶ Mode tri rapide</button>
+  </div>
+
+  <div class="chips" id="chips"></div>
+
+  <div class="grid" id="grid"></div>
+</section>
+
+<!-- ============ MODE TRI RAPIDE ============ -->
+<div id="focus" class="focus hidden">
+  <div class="focus-head">
+    <button class="btn sm ghost" id="focus-close">✕ Fermer</button>
+    <div class="spacer"></div>
+    <span id="focus-count" style="font-size:13.5px;color:var(--txt-2);font-variant-numeric:tabular-nums"></span>
+    <div class="spacer"></div>
+    <button class="btn sm ghost" id="focus-undo">↶ Annuler</button>
+  </div>
+  <div class="focus-body">
+    <div class="focus-card">
+      <div class="focus-media" id="focus-media"></div>
+      <h2 class="focus-title" id="focus-title"></h2>
+      <p class="focus-meta" id="focus-meta"></p>
+      <div class="focus-acts">
+        <button class="big drop" id="f-drop">✕ Retirer</button>
+        <button class="big later" id="f-later">★ Plus tard</button>
+        <button class="big keep" id="f-keep">✓ Garder</button>
+      </div>
+      <p style="margin-top:16px"><a class="inline-link" id="focus-link" target="_blank" rel="noopener noreferrer">Ouvrir sur Instagram ↗</a></p>
+    </div>
+  </div>
+  <div class="focus-foot">
+    <span><span class="kbd">←</span> retirer</span>
+    <span><span class="kbd">↓</span> plus tard</span>
+    <span><span class="kbd">→</span> garder</span>
+    <span><span class="kbd">Z</span> annuler</span>
+    <span><span class="kbd">O</span> ouvrir</span>
+    <span><span class="kbd">Échap</span> fermer</span>
+  </div>
+</div>
+
+<!-- ============ DIALOGUES ============ -->
+<dialog id="dlg-export">
+  <div class="dlg-head"><h3>Exporter votre tri</h3><div class="spacer"></div>
+    <button class="btn sm ghost" onclick="document.getElementById('dlg-export').close()">✕</button></div>
+  <div class="dlg-body">
+    <div class="toolbar" style="padding-bottom:12px">
+      <select class="sel" id="exp-scope"></select>
+      <select class="sel" id="exp-dec">
+        <option value="remove">À retirer ✕</option>
+        <option value="later">Plus tard ★</option>
+        <option value="keep">Gardés ✓</option>
+        <option value="all">Tout</option>
+      </select>
+      <select class="sel" id="exp-fmt">
+        <option value="links">Liste de liens</option>
+        <option value="csv">CSV (tableur)</option>
+        <option value="json">JSON (sauvegarde)</option>
+      </select>
+    </div>
+    <textarea class="out" id="exp-out" readonly></textarea>
+    <p style="font-size:13px;color:var(--txt-2);margin:12px 0 0">
+      Instagram ne permet pas de supprimer en masse depuis l'extérieur. Cette liste est votre feuille de route :
+      ouvrez chaque lien, agissez dans l'application, et cochez au fur et à mesure.</p>
+  </div>
+  <div class="dlg-foot">
+    <button class="btn" id="exp-copy">Copier</button>
+    <button class="btn primary" id="exp-dl">Télécharger</button>
+  </div>
+</dialog>
+
+<dialog id="dlg-help">
+  <div class="dlg-head"><h3>Mode d'emploi</h3><div class="spacer"></div>
+    <button class="btn sm ghost" onclick="document.getElementById('dlg-help').close()">✕</button></div>
+  <div class="dlg-body">
+    <h4 style="margin:0 0 8px">Obtenir vos données Instagram</h4>
+    <ul class="plain">
+      <li>Dans l'application : <b>Paramètres → Centre de comptes → Vos informations et autorisations → Télécharger vos informations</b>.</li>
+      <li>Choisissez <b>toutes les informations</b> ou seulement : publications, enregistrements, j'aime, abonnés et abonnements.</li>
+      <li>Format : <b>JSON</b> (pas HTML). Qualité des médias : au choix.</li>
+      <li>Vous recevez un e-mail avec un lien de téléchargement. Gardez le .zip tel quel.</li>
+    </ul>
+    <h4 style="margin:18px 0 8px">Trier</h4>
+    <ul class="plain">
+      <li><b>Mode tri rapide</b> : un élément à la fois, au clavier. Le plus efficace pour de gros volumes.</li>
+      <li><b>Grille</b> : vue d'ensemble, sélection multiple avec un clic sur la vignette, puis action groupée.</li>
+      <li>Filtres : non triés, gardés, à retirer, plus tard. Plus les filtres propres aux abonnements.</li>
+    </ul>
+    <h4 style="margin:18px 0 8px">Agir ensuite</h4>
+    <ul class="plain">
+      <li><b>Exporter</b> produit la liste des liens correspondant à vos décisions.</li>
+      <li>Ouvrez les liens un par un et faites l'action dans Instagram (désenregistrer, se désabonner, archiver…).</li>
+      <li>Le JSON exporté sert de sauvegarde : vos décisions restent sinon dans ce navigateur uniquement.</li>
+    </ul>
+    <h4 style="margin:18px 0 8px">Confidentialité</h4>
+    <ul class="plain">
+      <li>Aucune connexion, aucun identifiant, aucun envoi : l'archive est lue localement par le navigateur.</li>
+      <li>Les vignettes proviennent des fichiers de votre archive, pas d'Internet.</li>
+    </ul>
+  </div>
+  <div class="dlg-foot"><button class="btn primary" onclick="document.getElementById('dlg-help').close()">Compris</button></div>
+</dialog>
+
+<div class="toast" id="toast"></div>
+<script>
+"use strict";
+
+/* =========================================================================
+   Tri Instagram — application locale de tri de bibliothèque
+   Tout le traitement se fait dans le navigateur. Aucune requête réseau
+   n'est émise avec les données de l'utilisateur.
+   ========================================================================= */
+
+/* ----------------------------- constantes ------------------------------ */
+
+const TYPES = [
+  { key:'saved',     label:'Enregistrements',    ico:'🔖', unit:'enregistrement' },
+  { key:'post',      label:'Mes publications',   ico:'🖼',  unit:'publication' },
+  { key:'archived',  label:'Archivées',          ico:'📦', unit:'publication' },
+  { key:'story',     label:'Stories',            ico:'⚡', unit:'story' },
+  { key:'liked',     label:"J'aime",             ico:'❤',  unit:'mention' },
+  { key:'following', label:'Abonnements',        ico:'→',  unit:'compte' },
+  { key:'follower',  label:'Abonnés',            ico:'←',  unit:'compte' },
+  { key:'close',     label:'Amis proches',       ico:'★',  unit:'compte' },
+  { key:'pending',   label:'Demandes envoyées',  ico:'⏳', unit:'demande' },
+  { key:'blocked',   label:'Comptes bloqués',    ico:'⛔', unit:'compte' },
+];
+const TYPE_LABEL = Object.fromEntries(TYPES.map(t => [t.key, t.label]));
+const DEC_LABEL = { keep:'Gardé', remove:'À retirer', later:'Plus tard' };
+const LS_DEC = 'tri-ig:decisions';
+const LS_SNAP = 'tri-ig:snapshot';
+const PAGE = 120;
+const VIDEO_EXT = /\.(mp4|mov|m4v|webm)$/i;
+const IMAGE_EXT = /\.(jpe?g|png|webp|gif|heic|avif)$/i;
+
+/* ------------------------------- état ---------------------------------- */
+
+const S = {
+  items: [],
+  tab: null,
+  q: '',
+  sort: 'date-desc',
+  status: 'untriaged',
+  rel: null,                 // filtre propre aux abonnements
+  decisions: loadDecisions(),
+  selection: new Set(),
+  history: [],
+  media: null,
+  page: 1,
+  focusList: [],
+  focusIdx: 0,
+  hasMedia: false,
+};
+
+function loadDecisions() {
+  try { return JSON.parse(localStorage.getItem(LS_DEC) || '{}') || {}; }
+  catch (e) { return {}; }
+}
+let saveTimer = null;
+function saveDecisions() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try { localStorage.setItem(LS_DEC, JSON.stringify(S.decisions)); } catch (e) {}
+  }, 250);
+}
+
+/* ------------------------------ utilitaires ---------------------------- */
+
+const $  = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/* Les exports Instagram encodent l'UTF-8 en latin-1 : « Ã© » au lieu de « é ». */
+function fixText(s) {
+  if (typeof s !== 'string' || s === '') return s || '';
+  if (!/[Â-ÃÅâï]/.test(s)) return s;
+  const bytes = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c > 255) return s;
+    bytes[i] = c;
+  }
+  try {
+    const out = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return out;
+  } catch (e) { return s; }
+}
+
+function hash(str) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
+function fmtDate(ts) {
+  if (!ts) return '';
+  const d = new Date(ts * 1000);
+  if (isNaN(d)) return '';
+  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+function fmtNum(n) { return n.toLocaleString('fr-FR'); }
+
+function profileUrl(user) {
+  const u = String(user || '').trim().replace(/^@/, '');
+  return u ? 'https://www.instagram.com/' + encodeURIComponent(u) + '/' : '';
+}
+
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove('show'), 1900);
+}
+
+function download(name, text, mime) {
+  const blob = new Blob([text], { type: (mime || 'text/plain') + ';charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+/* --------------------------- stockage des médias ----------------------- */
+
+class MediaStore {
+  constructor() {
+    this.byPath = new Map();   // chemin normalisé -> accesseur
+    this.byBase = new Map();   // nom de fichier -> chemin normalisé
+    this.cache = new Map();    // chemin -> objet URL
+    this.order = [];
+  }
+  static norm(p) {
+    return String(p || '').replace(/\\/g, '/').replace(/^\.?\//, '').toLowerCase();
+  }
+  add(path, getter) {
+    const n = MediaStore.norm(path);
+    if (!n || this.byPath.has(n)) return;
+    this.byPath.set(n, getter);
+    const base = n.split('/').pop();
+    if (base && !this.byBase.has(base)) this.byBase.set(base, n);
+  }
+  resolve(uri) {
+    const n = MediaStore.norm(uri);
+    if (!n) return null;
+    if (this.byPath.has(n)) return n;
+    const base = n.split('/').pop();
+    if (this.byBase.has(base)) return this.byBase.get(base);
+    for (const key of this.byPath.keys()) if (key.endsWith(n)) return key;
+    return null;
+  }
+  has(uri) { return !!this.resolve(uri); }
+  async url(uri) {
+    const key = this.resolve(uri);
+    if (!key) return null;
+    if (this.cache.has(key)) return this.cache.get(key);
+    const getter = this.byPath.get(key);
+    let blob;
+    try { blob = await getter(); } catch (e) { return null; }
+    if (!blob) return null;
+    const url = URL.createObjectURL(blob);
+    this.cache.set(key, url);
+    this.order.push(key);
+    while (this.order.length > 260) {
+      const old = this.order.shift();
+      const u = this.cache.get(old);
+      if (u) { URL.revokeObjectURL(u); this.cache.delete(old); }
+    }
+    return url;
+  }
+  release() {
+    for (const u of this.cache.values()) URL.revokeObjectURL(u);
+    this.cache.clear(); this.order.length = 0;
+  }
+}
+
+/* ---------------------------- analyse de l'export ---------------------- */
+
+function entriesOf(json) {
+  if (Array.isArray(json)) return json;
+  if (json && typeof json === 'object') {
+    for (const k of Object.keys(json)) if (Array.isArray(json[k])) return json[k];
+  }
+  return [];
+}
+
+function parseRelations(entries, type) {
+  const out = [];
+  for (const e of entries) {
+    const list = Array.isArray(e.string_list_data) ? e.string_list_data : [];
+    if (!list.length) {
+      const name = fixText(e.title || '');
+      if (name) out.push({ type, title: name, user: name, href: profileUrl(name), ts: e.timestamp || 0, uris: [] });
+      continue;
+    }
+    for (const d of list) {
+      const name = fixText(d.value || e.title || '');
+      if (!name && !d.href) continue;
+      out.push({ type, title: name || d.href, user: name, href: d.href || profileUrl(name), ts: d.timestamp || 0, uris: [] });
+    }
+  }
+  return out;
+}
+
+function parseSaved(entries) {
+  const out = [];
+  for (const e of entries) {
+    const map = e.string_map_data || {};
+    const first = map['Saved on'] || map['Enregistré le'] || map['Enregistre le'] || Object.values(map)[0] || {};
+    const user = fixText(e.title || '');
+    const href = first.href || profileUrl(user);
+    if (!href && !user) continue;
+    out.push({ type: 'saved', title: user || href, user, href, ts: first.timestamp || 0, uris: [] });
+  }
+  return out;
+}
+
+function parseLiked(entries) {
+  const out = [];
+  for (const e of entries) {
+    const d = (Array.isArray(e.string_list_data) ? e.string_list_data : [])[0] || {};
+    const user = fixText(e.title || '');
+    const href = d.href || profileUrl(user);
+    if (!href && !user) continue;
+    out.push({ type: 'liked', title: user || href, user, href, ts: d.timestamp || 0, uris: [] });
+  }
+  return out;
+}
+
+function parseMediaPosts(entries, type) {
+  const out = [];
+  for (const e of entries) {
+    const media = Array.isArray(e.media) ? e.media : (e.uri ? [e] : []);
+    if (!media.length && !e.title) continue;
+    const caption = fixText(e.title || '') || fixText((media[0] && media[0].title) || '');
+    const ts = e.creation_timestamp || (media[0] && media[0].creation_timestamp) || e.taken_at || 0;
+    const uris = media.map(m => m.uri).filter(Boolean);
+    out.push({
+      type,
+      title: caption || '(sans légende)',
+      user: '',
+      href: '',
+      ts,
+      uris,
+      n: uris.length,
+    });
+  }
+  return out;
+}
+
+/* nom de fichier -> analyseur. Le premier motif correspondant gagne. */
+const ROUTES = [
+  [/^posts_\d+\.json$/i,                j => parseMediaPosts(entriesOf(j), 'post')],
+  [/^archived_posts\.json$/i,           j => parseMediaPosts(entriesOf(j), 'archived')],
+  [/^stories\.json$/i,                  j => parseMediaPosts(entriesOf(j), 'story')],
+  [/^(your_reels|reels)\.json$/i,       j => parseMediaPosts(entriesOf(j), 'post')],
+  [/^saved_posts\.json$/i,              j => parseSaved(entriesOf(j))],
+  [/^liked_posts\.json$/i,              j => parseLiked(entriesOf(j))],
+  [/^followers(_\d+)?\.json$/i,         j => parseRelations(entriesOf(j), 'follower')],
+  [/^following\.json$/i,                j => parseRelations(entriesOf(j), 'following')],
+  [/^close_friends\.json$/i,            j => parseRelations(entriesOf(j), 'close')],
+  [/^pending_follow_requests\.json$/i,  j => parseRelations(entriesOf(j), 'pending')],
+  [/^blocked_profiles\.json$/i,         j => parseRelations(entriesOf(j), 'blocked')],
+];
+
+function routeFor(path) {
+  const base = String(path).replace(/\\/g, '/').split('/').pop();
+  for (const [re, fn] of ROUTES) if (re.test(base)) return fn;
+  return null;
+}
+
+function finalize(items) {
+  const seen = new Set();
+  const out = [];
+  for (const it of items) {
+    const sig = [it.type, it.href || '', it.user || '', it.ts || 0, (it.uris && it.uris[0]) || '', it.title || ''].join('|');
+    const id = it.type + '-' + hash(sig);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    it.id = id;
+    it.search = ((it.user || '') + ' ' + (it.title || '')).toLowerCase();
+    out.push(it);
+  }
+  return out;
+}
+
+/* ------------------------------- import -------------------------------- */
+
+function status(msg) { $('#import-status').innerHTML = msg; }
+
+/* ------------------------- lecteur ZIP natif ---------------------------
+   Lit l'archive directement (central directory + inflate via
+   DecompressionStream). Aucune bibliothèque externe, aucune requête réseau,
+   et les fichiers ne sont décompressés qu'à la demande.
+   --------------------------------------------------------------------- */
+
+const SIG_EOCD = 0x06054b50, SIG_Z64_LOC = 0x07064b50, SIG_Z64_EOCD = 0x06064b50,
+      SIG_CD = 0x02014b50, SIG_LFH = 0x04034b50, U32MAX = 0xffffffff;
+
+async function dv(file, start, end) {
+  return new DataView(await file.slice(start, end).arrayBuffer());
+}
+
+async function openZip(file) {
+  const size = file.size;
+  if (size < 22) throw new Error('fichier trop petit pour être une archive');
+  const tailLen = Math.min(size, 65557 + 64);
+  const tail = await dv(file, size - tailLen, size);
+  let eocd = -1;
+  for (let i = tail.byteLength - 22; i >= 0; i--) {
+    if (tail.getUint32(i, true) === SIG_EOCD) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('archive .zip non reconnue');
+
+  let count  = tail.getUint16(eocd + 10, true);
+  let cdSize = tail.getUint32(eocd + 12, true);
+  let cdOff  = tail.getUint32(eocd + 16, true);
+
+  if (cdOff === U32MAX || cdSize === U32MAX || count === 0xffff) {
+    const loc = eocd - 20;
+    if (loc >= 0 && tail.getUint32(loc, true) === SIG_Z64_LOC) {
+      const z64Off = Number(tail.getBigUint64(loc + 8, true));
+      const z64 = await dv(file, z64Off, Math.min(z64Off + 56, size));
+      if (z64.getUint32(0, true) === SIG_Z64_EOCD) {
+        count  = Number(z64.getBigUint64(32, true));
+        cdSize = Number(z64.getBigUint64(40, true));
+        cdOff  = Number(z64.getBigUint64(48, true));
+      }
+    }
+  }
+  if (!cdSize || cdOff + cdSize > size) throw new Error('index de l\'archive illisible');
+
+  const cd = await dv(file, cdOff, cdOff + cdSize);
+  const dec = new TextDecoder('utf-8');
+  const entries = [];
+  let p = 0;
+  while (p + 46 <= cd.byteLength && cd.getUint32(p, true) === SIG_CD) {
+    const method   = cd.getUint16(p + 10, true);
+    let   csize    = cd.getUint32(p + 20, true);
+    let   usize    = cd.getUint32(p + 24, true);
+    const nameLen  = cd.getUint16(p + 28, true);
+    const extraLen = cd.getUint16(p + 30, true);
+    const cmtLen   = cd.getUint16(p + 32, true);
+    let   lho      = cd.getUint32(p + 42, true);
+    const name = dec.decode(new Uint8Array(cd.buffer, cd.byteOffset + p + 46, nameLen));
+
+    if (csize === U32MAX || usize === U32MAX || lho === U32MAX) {
+      let q = p + 46 + nameLen, end = q + extraLen;
+      while (q + 4 <= end) {
+        const hid = cd.getUint16(q, true), hsz = cd.getUint16(q + 2, true);
+        if (hid === 0x0001) {
+          let r = q + 4;
+          if (usize === U32MAX) { usize = Number(cd.getBigUint64(r, true)); r += 8; }
+          if (csize === U32MAX) { csize = Number(cd.getBigUint64(r, true)); r += 8; }
+          if (lho   === U32MAX) { lho   = Number(cd.getBigUint64(r, true)); r += 8; }
+          break;
+        }
+        q += 4 + hsz;
+      }
+    }
+    p += 46 + nameLen + extraLen + cmtLen;
+    if (!name || name.endsWith('/')) continue;
+    entries.push({ name, method, csize, usize, lho });
+  }
+  if (!entries.length) throw new Error('aucun fichier trouvé dans l\'archive');
+  return { file, entries };
+}
+
+async function zipBlob(zip, e) {
+  const head = await dv(zip.file, e.lho, e.lho + 30);
+  if (head.getUint32(0, true) !== SIG_LFH) throw new Error('entrée corrompue : ' + e.name);
+  const start = e.lho + 30 + head.getUint16(26, true) + head.getUint16(28, true);
+  const raw = zip.file.slice(start, start + e.csize);
+  if (e.method === 0) return raw;
+  if (e.method === 8) {
+    if (typeof DecompressionStream === 'undefined')
+      throw new Error('ce navigateur ne sait pas décompresser : décompressez l\'archive et utilisez « Choisir le dossier »');
+    return new Response(raw.stream().pipeThrough(new DecompressionStream('deflate-raw'))).blob();
+  }
+  throw new Error('méthode de compression non prise en charge (' + e.method + ')');
+}
+
+async function zipText(zip, e) { return (await zipBlob(zip, e)).text(); }
+
+async function importZip(file) {
+  status('Ouverture de l\'archive…');
+  let zip;
+  try { zip = await openZip(file); }
+  catch (err) {
+    status('<span style="color:var(--drop)">' + esc(err.message) + '</span>');
+    return;
+  }
+  const media = new MediaStore();
+  const jsons = [];
+  for (const e of zip.entries) {
+    if (/\.json$/i.test(e.name)) { if (routeFor(e.name)) jsons.push(e); continue; }
+    if (IMAGE_EXT.test(e.name) || VIDEO_EXT.test(e.name)) media.add(e.name, () => zipBlob(zip, e));
+  }
+  if (!jsons.length) {
+    status('<span style="color:var(--drop)">Aucun fichier de données reconnu dans cette archive. Vérifiez que l\'export a bien été demandé au format JSON.</span>');
+    return;
+  }
+  let all = [];
+  let done = 0;
+  for (const e of jsons) {
+    status('Lecture : ' + esc(e.name.split('/').pop()) + ' (' + (++done) + '/' + jsons.length + ')');
+    try { all = all.concat(routeFor(e.name)(JSON.parse(await zipText(zip, e))) || []); }
+    catch (err) { /* fichier illisible : on continue avec les autres */ }
+  }
+  if (!all.length) {
+    status('<span style="color:var(--drop)">Les fichiers de l\'archive ne contiennent aucun élément exploitable.</span>');
+    return;
+  }
+  boot(all, media, media.byPath.size > 0);
+}
+
+async function importFiles(fileList) {
+  const files = Array.from(fileList);
+  const zipFile = files.find(f => /\.zip$/i.test(f.name));
+  if (zipFile && files.length === 1) return importZip(zipFile);
+
+  const media = new MediaStore();
+  const jsons = [];
+  for (const f of files) {
+    const path = f.webkitRelativePath || f.name;
+    if (/\.json$/i.test(path)) {
+      if (routeFor(path)) jsons.push({ path, file: f });
+      else if (f.size < 12e6) jsons.push({ path, file: f, maybeBackup: true });
+      continue;
+    }
+    if (IMAGE_EXT.test(path) || VIDEO_EXT.test(path)) media.add(path, () => Promise.resolve(f));
+  }
+  if (!jsons.length) {
+    status('<span style="color:var(--drop)">Aucun fichier de données reconnu. Sélectionnez le dossier racine de l\'export décompressé.</span>');
+    return;
+  }
+  let all = [];
+  let done = 0;
+  for (const j of jsons) {
+    status('Lecture : ' + esc(j.path.split('/').pop()) + ' (' + (++done) + '/' + jsons.length + ')');
+    let json;
+    try { json = JSON.parse(await j.file.text()); } catch (e) { continue; }
+    if (json && json.__triInstagram && json.decisions) { restoreBackup(json); continue; }
+    const fn = routeFor(j.path);
+    if (fn) all = all.concat(fn(json) || []);
+  }
+  if (!all.length) {
+    status('<span style="color:var(--drop)">Les fichiers lus ne contiennent aucun élément exploitable.</span>');
+    return;
+  }
+  boot(all, media, media.byPath.size > 0);
+}
+
+function restoreBackup(json) {
+  let n = 0;
+  for (const [id, dec] of Object.entries(json.decisions || {})) {
+    if (['keep', 'remove', 'later'].includes(dec)) { S.decisions[id] = dec; n++; }
+  }
+  saveDecisions();
+  toast(n + ' décision(s) restaurée(s)');
+}
+
+function demoData() {
+  const users = ['atelier.corvus','revue.noire','paul.m','studio_sombre','cafe.du.port','les_carnets','mina.photo','archives.90','lab.typo','veloclub','jardin.urbain','sonia.ceramique'];
+  const caps = ['Sortie du matin','Essais de lumière','Carnet de notes','Au bord de l\'eau','Nouvelle série','Croquis rapide','Impression test','Sans titre','Chantier en cours','Vieux papiers'];
+  const now = Math.floor(Date.now() / 1000);
+  const out = [];
+  const rnd = (n) => Math.floor(Math.random() * n);
+  for (let i = 0; i < 48; i++) { const u = users[rnd(users.length)]; out.push({ type:'saved', title:u, user:u, href:'https://www.instagram.com/p/demo' + i + '/', ts: now - rnd(600) * 86400, uris: [] }); }
+  for (let i = 0; i < 36; i++) { const u = users[rnd(users.length)]; out.push({ type:'liked', title:u, user:u, href:'https://www.instagram.com/p/like' + i + '/', ts: now - rnd(400) * 86400, uris: [] }); }
+  for (let i = 0; i < 24; i++) out.push({ type:'post', title:caps[rnd(caps.length)], user:'', href:'', ts: now - rnd(900) * 86400, uris: [], n: 1 + rnd(3) });
+  for (let i = 0; i < 60; i++) { const u = users[rnd(users.length)] + '_' + i; out.push({ type:'following', title:u, user:u, href:profileUrl(u), ts: now - rnd(1200) * 86400, uris: [] }); }
+  for (let i = 0; i < 45; i++) { const u = users[rnd(users.length)] + '_' + i; out.push({ type:'follower', title:u, user:u, href:profileUrl(u), ts: now - rnd(1200) * 86400, uris: [] }); }
+  return out;
+}
+
+function boot(rawItems, media, hasMedia) {
+  if (S.media) S.media.release();
+  S.items = finalize(rawItems);
+  S.media = media || new MediaStore();
+  S.hasMedia = !!hasMedia;
+  S.selection.clear();
+  S.history.length = 0;
+  if (!S.items.length) {
+    status('<span style="color:var(--drop)">Aucun élément trouvé.</span>');
+    return;
+  }
+  const counts = countsByType();
+  S.tab = (TYPES.find(t => counts[t.key]) || TYPES[0]).key;
+  S.status = 'untriaged';
+  S.rel = null;
+  S.q = '';
+  $('#q').value = '';
+  saveSnapshot();
+  $('#screen-import').classList.add('hidden');
+  $('#screen-app').classList.remove('hidden');
+  $('#btn-export').classList.remove('hidden');
+  $('#btn-reset').classList.remove('hidden');
+  renderAll();
+  toast(fmtNum(S.items.length) + ' éléments chargés');
+}
+
+function saveSnapshot() {
+  try {
+    if (S.items.length > 24000) { localStorage.removeItem(LS_SNAP); return; }
+    const slim = S.items.map(i => ({ t:i.type, ti:i.title, u:i.user, h:i.href, ts:i.ts, n:i.n || 0 }));
+    localStorage.setItem(LS_SNAP, JSON.stringify({ at: Date.now(), items: slim }));
+  } catch (e) { /* quota dépassé : la reprise ne sera pas disponible */ }
+}
+
+function loadSnapshot() {
+  try {
+    const raw = localStorage.getItem(LS_SNAP);
+    if (!raw) return null;
+    const snap = JSON.parse(raw);
+    if (!snap || !Array.isArray(snap.items) || !snap.items.length) return null;
+    return snap;
+  } catch (e) { return null; }
+}
+
+function resumeSnapshot() {
+  const snap = loadSnapshot();
+  if (!snap) return;
+  const items = snap.items.map(i => ({ type:i.t, title:i.ti, user:i.u, href:i.h, ts:i.ts, n:i.n, uris: [] }));
+  boot(items, new MediaStore(), false);
+  toast('Session précédente reprise (sans les images)');
+}
+
+/* ------------------------------- sélection ----------------------------- */
+
+function countsByType() {
+  const c = {};
+  for (const it of S.items) c[it.type] = (c[it.type] || 0) + 1;
+  return c;
+}
+
+function mutualSets() {
+  if (mutualSets._cache && mutualSets._for === S.items) return mutualSets._cache;
+  const norm = u => String(u || '').trim().toLowerCase();
+  const followers = new Set(), following = new Set();
+  for (const it of S.items) {
+    if (it.type === 'follower') followers.add(norm(it.user));
+    else if (it.type === 'following') following.add(norm(it.user));
+  }
+  const res = { followers, following, norm };
+  mutualSets._cache = res; mutualSets._for = S.items;
+  return res;
+}
+
+function relMatch(it) {
+  if (!S.rel) return true;
+  const { followers, following, norm } = mutualSets();
+  const u = norm(it.user);
+  if (S.rel === 'not-back') return it.type === 'following' && !followers.has(u);
+  if (S.rel === 'fan')      return it.type === 'follower' && !following.has(u);
+  if (S.rel === 'mutual')   return followers.has(u) && following.has(u);
+  return true;
+}
+
+function visibleItems() {
+  const q = S.q.trim().toLowerCase();
+  const terms = q ? q.split(/\s+/) : [];
+  let list = S.items.filter(it => {
+    if (it.type !== S.tab) return false;
+    const dec = S.decisions[it.id] || null;
+    if (S.status === 'untriaged' && dec) return false;
+    if (['keep', 'remove', 'later'].includes(S.status) && dec !== S.status) return false;
+    if (!relMatch(it)) return false;
+    for (const t of terms) if (!it.search.includes(t)) return false;
+    return true;
+  });
+  const dir = S.sort.endsWith('asc') ? 1 : -1;
+  if (S.sort.startsWith('date')) {
+    list.sort((a, b) => ((a.ts || 0) - (b.ts || 0)) * dir);
+  } else {
+    const key = it => (it.user || it.title || '').toLowerCase();
+    list.sort((a, b) => key(a).localeCompare(key(b), 'fr') * dir);
+  }
+  return list;
+}
+
+/* ------------------------------- décisions ----------------------------- */
+
+function decide(ids, dec, opts) {
+  const list = Array.isArray(ids) ? ids : [ids];
+  const batch = [];
+  for (const id of list) {
+    const prev = S.decisions[id] || null;
+    if (prev === dec) { delete S.decisions[id]; batch.push([id, prev]); continue; }
+    batch.push([id, prev]);
+    S.decisions[id] = dec;
+  }
+  if (batch.length) S.history.push(batch);
+  if (S.history.length > 400) S.history.shift();
+  saveDecisions();
+  if (!opts || !opts.silent) refreshLight();
+}
+
+function undo() {
+  const batch = S.history.pop();
+  if (!batch) { toast('Rien à annuler'); return false; }
+  for (const [id, prev] of batch) {
+    if (prev) S.decisions[id] = prev; else delete S.decisions[id];
+  }
+  saveDecisions();
+  return true;
+}
+
+function decisionStats(type) {
+  const st = { total: 0, keep: 0, remove: 0, later: 0, untriaged: 0 };
+  for (const it of S.items) {
+    if (type && it.type !== type) continue;
+    st.total++;
+    const d = S.decisions[it.id];
+    if (d === 'keep') st.keep++;
+    else if (d === 'remove') st.remove++;
+    else if (d === 'later') st.later++;
+    else st.untriaged++;
+  }
+  return st;
+}
+
+/* ------------------------------- rendu --------------------------------- */
+
+function renderAll() {
+  renderTabs();
+  renderStats();
+  renderChips();
+  renderGrid();
+}
+
+function refreshLight() {
+  renderTabs();
+  renderStats();
+  renderChips();
+  renderGrid();
+}
+
+function renderTabs() {
+  const counts = countsByType();
+  const html = TYPES.filter(t => counts[t.key]).map(t => {
+    const st = decisionStats(t.key);
+    return '<button class="tab' + (S.tab === t.key ? ' active' : '') + '" data-tab="' + t.key + '">' +
+      '<span>' + t.ico + '</span><span>' + esc(t.label) + '</span>' +
+      '<span class="cnt">' + fmtNum(st.untriaged) + '/' + fmtNum(st.total) + '</span></button>';
+  }).join('');
+  $('#tabs').innerHTML = html;
+}
+
+function renderStats() {
+  const st = decisionStats(S.tab);
+  const pct = st.total ? Math.round(((st.total - st.untriaged) / st.total) * 100) : 0;
+  $('#stats').innerHTML =
+    '<div class="stat"><b>' + fmtNum(st.total) + '</b><span>au total</span></div>' +
+    '<div class="stat"><b>' + pct + '&nbsp;%</b><span>trié</span></div>' +
+    '<div class="stat"><b>' + fmtNum(st.untriaged) + '</b><span>restants</span></div>' +
+    '<div class="stat"><b style="color:var(--drop)">' + fmtNum(st.remove) + '</b><span>à retirer</span></div>';
+
+  const bar = $('#progress');
+  const w = n => (st.total ? (n / st.total) * 100 : 0) + '%';
+  bar.children[0].style.width = w(st.keep);
+  bar.children[1].style.width = w(st.remove);
+  bar.children[2].style.width = w(st.later);
+  $('#legend').innerHTML =
+    '<span><i class="sw" style="background:var(--keep)"></i>Gardés <b>' + fmtNum(st.keep) + '</b></span>' +
+    '<span><i class="sw" style="background:var(--drop)"></i>À retirer <b>' + fmtNum(st.remove) + '</b></span>' +
+    '<span><i class="sw" style="background:var(--later)"></i>Plus tard <b>' + fmtNum(st.later) + '</b></span>' +
+    '<span><i class="sw" style="background:var(--bg-3)"></i>Non triés <b>' + fmtNum(st.untriaged) + '</b></span>';
+}
+
+function renderChips() {
+  const st = decisionStats(S.tab);
+  const base = [
+    ['untriaged', 'Non triés', st.untriaged, ''],
+    ['all', 'Tous', st.total, ''],
+    ['keep', 'Gardés', st.keep, 'k-keep'],
+    ['remove', 'À retirer', st.remove, 'k-drop'],
+    ['later', 'Plus tard', st.later, 'k-later'],
+  ];
+  let html = base.map(([k, label, n, cls]) =>
+    '<button class="chip ' + cls + (S.status === k ? ' active' : '') + '" data-status="' + k + '">' +
+    esc(label) + ' · ' + fmtNum(n) + '</button>').join('');
+
+  if (S.tab === 'following' || S.tab === 'follower') {
+    const { followers, following, norm } = mutualSets();
+    const cnt = (f) => S.items.filter(it => it.type === S.tab && f(norm(it.user))).length;
+    const rels = S.tab === 'following'
+      ? [['not-back', 'Ne me suit pas en retour', cnt(u => !followers.has(u))]]
+      : [['fan', 'Je ne le suis pas', cnt(u => !following.has(u))]];
+    rels.push(['mutual', 'Réciproques', cnt(u => followers.has(u) && following.has(u))]);
+    html += '<span style="width:12px"></span>' + rels.map(([k, label, n]) =>
+      '<button class="chip' + (S.rel === k ? ' active' : '') + '" data-rel="' + k + '">' +
+      esc(label) + ' · ' + fmtNum(n) + '</button>').join('');
+  }
+  $('#chips').innerHTML = html;
+}
+
+/* vignettes : chargées uniquement quand la carte devient visible */
+const thumbObserver = new IntersectionObserver(entries => {
+  for (const en of entries) {
+    if (!en.isIntersecting) continue;
+    thumbObserver.unobserve(en.target);
+    loadThumb(en.target);
+  }
+}, { rootMargin: '400px 0px' });
+
+async function loadThumb(el) {
+  const uri = el.dataset.uri;
+  if (!uri || !S.media) return;
+  const url = await S.media.url(uri);
+  if (!url) return;
+  if (VIDEO_EXT.test(uri)) {
+    el.innerHTML = '<video src="' + url + '" muted playsinline preload="metadata"></video>';
+  } else {
+    const img = new Image();
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.alt = '';
+    img.src = url;
+    el.innerHTML = '';
+    el.appendChild(img);
+  }
+}
+
+function avatarFor(name, cls) {
+  const txt = String(name || '?').replace(/^@/, '');
+  const letter = (txt.match(/[\p{L}\p{N}]/u) || ['?'])[0].toUpperCase();
+  const hue = (hash(txt.toLowerCase()).split('').reduce((a, c) => a + c.charCodeAt(0), 0) * 37) % 360;
+  return '<div class="avatar ' + (cls || '') + '" style="background:hsl(' + hue + ' 55% 62%)" title="' + esc(txt) + '">' + esc(letter) + '</div>';
+}
+
+function relBadge(it) {
+  if (it.type !== 'following' && it.type !== 'follower') return '';
+  const { followers, following, norm } = mutualSets();
+  const u = norm(it.user);
+  if (!u) return '';
+  const f = followers.has(u), g = following.has(u);
+  if (f && g) return '<span class="badge ok">réciproque</span>';
+  if (it.type === 'following') return '<span class="badge warn">ne vous suit pas</span>';
+  return '<span class="badge warn">non suivi</span>';
+}
+
+function decButtons(it, dec, cls) {
+  return '<div class="' + cls + '">' +
+    '<button data-dec="remove" class="' + (dec === 'remove' ? 'on drop' : '') + '" title="À retirer">✕</button>' +
+    '<button data-dec="later" class="' + (dec === 'later' ? 'on later' : '') + '" title="Plus tard">★</button>' +
+    '<button data-dec="keep" class="' + (dec === 'keep' ? 'on keep' : '') + '" title="Garder">✓</button>' +
+    '</div>';
+}
+
+function rowHTML(it) {
+  const dec = S.decisions[it.id] || null;
+  const sel = S.selection.has(it.id);
+  const name = it.user ? '@' + it.user : (it.title || '(sans titre)');
+  const title = it.href
+    ? '<a href="' + esc(it.href) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">' + esc(name) + ' ↗</a>'
+    : esc(name);
+  const meta = [];
+  if (it.ts) meta.push(fmtDate(it.ts));
+  if (it.user && it.title && it.title !== it.user) meta.push(esc(it.title));
+  if (dec) meta.push('<span style="color:var(--' + (dec === 'keep' ? 'keep' : dec === 'remove' ? 'drop' : 'later') + ')">' + DEC_LABEL[dec] + '</span>');
+  const badge = relBadge(it);
+  return '<div class="card row' + (dec ? ' d-' + (dec === 'remove' ? 'drop' : dec) + '' : '') + (sel ? ' sel' : '') + '" data-id="' + it.id + '">' +
+    avatarFor(it.user || it.title, 'pick') +
+    '<div class="row-main"><div class="row-title">' + title + '</div>' +
+    '<div class="row-meta">' + (badge ? badge + ' ' : '') + meta.join(' · ') + '</div></div>' +
+    decButtons(it, dec, 'row-acts') + '</div>';
+}
+
+function cardHTML(it) {
+  const dec = S.decisions[it.id] || null;
+  const sel = S.selection.has(it.id);
+  const uri = (it.uris && it.uris[0]) || '';
+  const hasThumb = uri && S.media && S.media.has(uri);
+  const multi = it.n > 1 ? '<span class="tag">×' + it.n + '</span>' : '';
+  const thumb = '<div class="thumb pick" data-uri="' + esc(hasThumb ? uri : '') + '">' +
+    (hasThumb ? '<span class="ph">◌</span>' : '<span class="ph">' + (TYPES.find(t => t.key === it.type) || {}).ico + '</span>') +
+    multi + '</div>';
+  const meta = [];
+  if (it.ts) meta.push(fmtDate(it.ts));
+  if (dec) meta.push('<span style="color:var(--' + (dec === 'keep' ? 'keep' : dec === 'remove' ? 'drop' : 'later') + ')">' + DEC_LABEL[dec] + '</span>');
+  const titleTxt = it.user ? '@' + it.user : (it.title || '(sans titre)');
+  const title = it.href
+    ? '<a href="' + esc(it.href) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">' + esc(titleTxt) + ' ↗</a>'
+    : esc(titleTxt);
+  const sub = (it.user && it.title && it.title !== it.user) ? '<div style="font-size:12px;color:var(--txt-2)">' + esc(it.title) + '</div>' : '';
+
+  return '<div class="card' + (dec ? ' d-' + (dec === 'remove' ? 'drop' : dec) : '') + (sel ? ' sel' : '') + '" data-id="' + it.id + '">' +
+    thumb +
+    '<div class="card-body"><div class="card-title">' + title + '</div>' + sub +
+    '<div class="card-meta">' + meta.join(' · ') + '</div></div>' +
+    decButtons(it, dec, 'card-acts') + '</div>';
+}
+
+let currentList = [];
+let listMode = false;
+
+function hasThumbs(list) {
+  if (!S.media) return false;
+  for (let i = 0; i < Math.min(list.length, 60); i++) {
+    const u = list[i].uris && list[i].uris[0];
+    if (u && S.media.has(u)) return true;
+  }
+  return false;
+}
+function itemHTML(it) { return listMode ? rowHTML(it) : cardHTML(it); }
+
+function renderGrid() {
+  currentList = visibleItems();
+  listMode = !hasThumbs(currentList);
+  S.page = 1;
+  const grid = $('#grid');
+  grid.classList.toggle('list', listMode);
+  if (!currentList.length) {
+    grid.innerHTML = '<div class="empty" style="grid-column:1/-1"><div class="ico">✓</div>' +
+      '<p><b>Rien à afficher ici.</b></p><p style="font-size:14px">' +
+      (S.status === 'untriaged' ? 'Tout est trié dans cette catégorie. Changez de filtre pour revoir vos choix.' : 'Aucun élément ne correspond aux filtres.') +
+      '</p></div>';
+    renderSelBar();
+    return;
+  }
+  grid.innerHTML = currentList.slice(0, PAGE).map(itemHTML).join('') + sentinel();
+  hydrate(grid);
+  renderSelBar();
+}
+
+function sentinel() {
+  return currentList.length > S.page * PAGE
+    ? '<div id="sentinel" style="grid-column:1/-1;text-align:center;padding:18px;color:var(--txt-2);font-size:14px">Chargement…</div>'
+    : '<div style="grid-column:1/-1;text-align:center;padding:18px;color:var(--txt-2);font-size:13px">' + fmtNum(currentList.length) + ' élément(s)</div>';
+}
+
+function appendPage() {
+  const grid = $('#grid');
+  const old = $('#sentinel');
+  if (old) old.remove();
+  const start = S.page * PAGE;
+  S.page++;
+  const slice = currentList.slice(start, S.page * PAGE);
+  const frag = document.createElement('div');
+  frag.innerHTML = slice.map(itemHTML).join('');
+  while (frag.firstChild) grid.appendChild(frag.firstChild);
+  grid.insertAdjacentHTML('beforeend', sentinel());
+  hydrate(grid);
+}
+
+function hydrate(root) {
+  $$('.thumb[data-uri]:not([data-uri=""])', root).forEach(el => {
+    if (el.dataset.obs) return;
+    el.dataset.obs = '1';
+    thumbObserver.observe(el);
+  });
+  const sent = $('#sentinel');
+  if (sent) pageObserver.observe(sent);
+}
+
+const pageObserver = new IntersectionObserver(entries => {
+  for (const en of entries) {
+    if (en.isIntersecting) { pageObserver.unobserve(en.target); appendPage(); }
+  }
+}, { rootMargin: '600px 0px' });
+
+function renderSelBar() {
+  const old = $('#selbar');
+  if (old) old.remove();
+  if (!S.selection.size) return;
+  const el = document.createElement('div');
+  el.id = 'selbar';
+  el.className = 'sticky-sel';
+  el.innerHTML = '<b>' + fmtNum(S.selection.size) + '</b> sélectionné(s)' +
+    '<button class="btn sm" data-bulk="keep">✓ Garder</button>' +
+    '<button class="btn sm" data-bulk="remove">✕ Retirer</button>' +
+    '<button class="btn sm" data-bulk="later">★ Plus tard</button>' +
+    '<button class="btn sm ghost" data-bulk="none">Désélectionner</button>';
+  document.body.appendChild(el);
+}
+
+/* ---------------------------- mode tri rapide -------------------------- */
+
+function openFocus() {
+  S.focusList = visibleItems();
+  if (!S.focusList.length) { toast('Aucun élément à trier avec ces filtres'); return; }
+  S.focusIdx = 0;
+  $('#focus').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  paintFocus();
+}
+
+function closeFocus() {
+  $('#focus').classList.add('hidden');
+  document.body.style.overflow = '';
+  refreshLight();
+}
+
+function focusOpen() { return !$('#focus').classList.contains('hidden'); }
+
+async function paintFocus() {
+  if (S.focusIdx >= S.focusList.length) {
+    $('#focus-media').innerHTML = '<span class="ph">✓</span>';
+    $('#focus-title').textContent = 'Terminé !';
+    $('#focus-meta').textContent = 'Vous avez passé en revue toute la liste.';
+    $('#focus-count').textContent = fmtNum(S.focusList.length) + ' / ' + fmtNum(S.focusList.length);
+    $('#focus-link').classList.add('hidden');
+    return;
+  }
+  const it = S.focusList[S.focusIdx];
+  $('#focus-count').textContent = fmtNum(S.focusIdx + 1) + ' / ' + fmtNum(S.focusList.length);
+  $('#focus-title').textContent = it.user ? '@' + it.user : (it.title || '(sans titre)');
+  $('#focus-title').classList.toggle('hidden', !(it.uris && it.uris[0] && S.media && S.media.has(it.uris[0])));
+  const bits = [];
+  bits.push(TYPE_LABEL[it.type] || it.type);
+  if (it.ts) bits.push(fmtDate(it.ts));
+  if (it.user && it.title && it.title !== it.user) bits.push(it.title);
+  if (it.n > 1) bits.push(it.n + ' médias');
+  const dec = S.decisions[it.id];
+  if (dec) bits.push('déjà : ' + DEC_LABEL[dec]);
+  $('#focus-meta').textContent = bits.join(' · ');
+
+  const link = $('#focus-link');
+  if (it.href) { link.href = it.href; link.classList.remove('hidden'); }
+  else link.classList.add('hidden');
+
+  const box = $('#focus-media');
+  const uri = (it.uris && it.uris[0]) || '';
+  const thumbable = uri && S.media && S.media.has(uri);
+  if (thumbable) {
+    box.className = 'focus-media';
+    box.innerHTML = '<span class="ph">◌</span>';
+    const url = await S.media.url(uri);
+    if (url && S.focusList[S.focusIdx] === it) {
+      box.innerHTML = VIDEO_EXT.test(uri)
+        ? '<video src="' + url + '" controls muted playsinline></video>'
+        : '<img src="' + url + '" alt="">';
+    }
+    return;
+  }
+  // pas d'image dans l'export : afficher une fiche lisible plutôt qu'un cadre vide
+  box.className = 'focus-media ident';
+  const name = it.user ? '@' + it.user : (it.title || '(sans titre)');
+  const sub = [];
+  if (it.ts) sub.push((it.type === 'following' || it.type === 'follower' ? 'depuis ' : '') + fmtDate(it.ts));
+  if (it.user && it.title && it.title !== it.user) sub.push(it.title);
+  if (!it.href) sub.push('aucun lien dans l\'export');
+  box.innerHTML = '<div class="ident-box">' + avatarFor(it.user || it.title) +
+    '<div class="idname">' + esc(name) + '</div>' +
+    '<div class="idsub">' + esc(sub.join(' · ')) + '</div>' +
+    (relBadge(it) ? '<div style="margin-top:8px">' + relBadge(it) + '</div>' : '') +
+    '</div>';
+}
+
+function focusDecide(dec) {
+  if (S.focusIdx >= S.focusList.length) return;
+  const it = S.focusList[S.focusIdx];
+  S.decisions[it.id] = dec;
+  S.history.push([[it.id, null]]);
+  saveDecisions();
+  S.focusIdx++;
+  paintFocus();
+}
+
+function focusUndo() {
+  if (S.focusIdx > 0) {
+    S.focusIdx--;
+    const it = S.focusList[S.focusIdx];
+    delete S.decisions[it.id];
+    saveDecisions();
+    paintFocus();
+  } else { toast('Début de la liste'); }
+}
+
+/* -------------------------------- export ------------------------------- */
+
+function exportRows() {
+  const scope = $('#exp-scope').value;
+  const dec = $('#exp-dec').value;
+  return S.items.filter(it => {
+    if (scope !== 'all' && it.type !== scope) return false;
+    const d = S.decisions[it.id] || null;
+    if (dec === 'all') return true;
+    return d === dec;
+  });
+}
+
+function buildExport() {
+  const rows = exportRows();
+  const fmt = $('#exp-fmt').value;
+  const decKey = $('#exp-dec').value;
+  const scopeLabel = $('#exp-scope').selectedOptions[0].textContent;
+  const decLabel = $('#exp-dec').selectedOptions[0].textContent;
+
+  if (fmt === 'json') {
+    const payload = {
+      __triInstagram: 1,
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      count: rows.length,
+      decisions: Object.fromEntries(rows.map(r => [r.id, S.decisions[r.id] || null])),
+      items: rows.map(r => ({ id:r.id, type:r.type, user:r.user, title:r.title, url:r.href, date: r.ts ? new Date(r.ts * 1000).toISOString() : null, decision: S.decisions[r.id] || null })),
+    };
+    return { text: JSON.stringify(payload, null, 2), name: 'tri-instagram-sauvegarde.json', mime: 'application/json' };
+  }
+
+  if (fmt === 'csv') {
+    const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+    const lines = [['categorie', 'decision', 'compte', 'titre', 'lien', 'date'].join(',')];
+    for (const r of rows) {
+      lines.push([
+        q(TYPE_LABEL[r.type] || r.type),
+        q(DEC_LABEL[S.decisions[r.id]] || 'non trié'),
+        q(r.user || ''), q(r.title || ''), q(r.href || ''),
+        q(r.ts ? new Date(r.ts * 1000).toISOString().slice(0, 10) : ''),
+      ].join(','));
+    }
+    return { text: '﻿' + lines.join('\r\n'), name: 'tri-instagram.csv', mime: 'text/csv' };
+  }
+
+  const head = [
+    '# Tri Instagram — ' + scopeLabel + ' — ' + decLabel,
+    '# ' + rows.length + ' élément(s) — généré le ' + new Date().toLocaleString('fr-FR'),
+    '# Ouvrez chaque lien et effectuez l\'action dans Instagram.',
+    '',
+  ];
+  const body = rows.map(r => {
+    const parts = [r.href || '(aucun lien dans l\'export)'];
+    if (r.user) parts.push('@' + r.user);
+    if (r.ts) parts.push(fmtDate(r.ts));
+    if (!r.user && r.title) parts.push(r.title.slice(0, 60));
+    return parts.join('   ');
+  });
+  return { text: head.concat(body).join('\n'), name: 'tri-instagram-liens.txt', mime: 'text/plain' };
+}
+
+let lastExport = null;
+function refreshExport() {
+  lastExport = buildExport();
+  $('#exp-out').value = lastExport.text;
+}
+
+function openExport() {
+  const counts = countsByType();
+  const opts = ['<option value="all">Toutes les catégories</option>']
+    .concat(TYPES.filter(t => counts[t.key]).map(t =>
+      '<option value="' + t.key + '"' + (t.key === S.tab ? ' selected' : '') + '>' + esc(t.label) + '</option>'));
+  $('#exp-scope').innerHTML = opts.join('');
+  refreshExport();
+  $('#dlg-export').showModal();
+}
+
+/* -------------------------------- événements --------------------------- */
+
+$('#tabs').addEventListener('click', e => {
+  const b = e.target.closest('[data-tab]');
+  if (!b) return;
+  S.tab = b.dataset.tab;
+  S.rel = null;
+  S.selection.clear();
+  renderAll();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+});
+
+$('#chips').addEventListener('click', e => {
+  const s = e.target.closest('[data-status]');
+  if (s) { S.status = s.dataset.status; S.selection.clear(); renderGrid(); renderChips(); return; }
+  const r = e.target.closest('[data-rel]');
+  if (r) { S.rel = (S.rel === r.dataset.rel) ? null : r.dataset.rel; S.selection.clear(); renderGrid(); renderChips(); }
+});
+
+$('#grid').addEventListener('click', e => {
+  const card = e.target.closest('.card');
+  if (!card) return;
+  const id = card.dataset.id;
+  const btn = e.target.closest('[data-dec]');
+  if (btn) {
+    decide(id, btn.dataset.dec);
+    return;
+  }
+  if (e.target.closest('a')) return;
+  if (e.target.closest('.pick') || e.target.closest('.row-main')) {
+    if (S.selection.has(id)) S.selection.delete(id); else S.selection.add(id);
+    card.classList.toggle('sel', S.selection.has(id));
+    renderSelBar();
+  }
+});
+
+document.body.addEventListener('click', e => {
+  const b = e.target.closest('[data-bulk]');
+  if (!b) return;
+  const act = b.dataset.bulk;
+  if (act === 'none') { S.selection.clear(); renderGrid(); return; }
+  const ids = Array.from(S.selection);
+  for (const id of ids) S.decisions[id] = act;
+  S.history.push(ids.map(id => [id, null]));
+  saveDecisions();
+  S.selection.clear();
+  toast(ids.length + ' élément(s) → ' + DEC_LABEL[act].toLowerCase());
+  refreshLight();
+});
+
+let qTimer = null;
+$('#q').addEventListener('input', e => {
+  clearTimeout(qTimer);
+  qTimer = setTimeout(() => { S.q = e.target.value; renderGrid(); }, 160);
+});
+$('#sort').addEventListener('change', e => { S.sort = e.target.value; renderGrid(); });
+
+$('#btn-focus').addEventListener('click', openFocus);
+$('#focus-close').addEventListener('click', closeFocus);
+$('#f-keep').addEventListener('click', () => focusDecide('keep'));
+$('#f-drop').addEventListener('click', () => focusDecide('remove'));
+$('#f-later').addEventListener('click', () => focusDecide('later'));
+$('#focus-undo').addEventListener('click', focusUndo);
+
+$('#btn-export').addEventListener('click', openExport);
+['#exp-scope', '#exp-dec', '#exp-fmt'].forEach(sel => $(sel).addEventListener('change', refreshExport));
+$('#exp-copy').addEventListener('click', async () => {
+  const text = (lastExport && lastExport.text) || $('#exp-out').value;
+  try { await navigator.clipboard.writeText(text); toast('Copié'); }
+  catch (e) { $('#exp-out').select(); document.execCommand('copy'); toast('Copié'); }
+});
+$('#exp-dl').addEventListener('click', () => {
+  if (!lastExport) refreshExport();
+  download(lastExport.name, lastExport.text, lastExport.mime);
+});
+
+$('#btn-help').addEventListener('click', () => $('#dlg-help').showModal());
+$('#btn-reset').addEventListener('click', () => {
+  if (!confirm('Revenir à l\'écran d\'import ? Vos décisions restent enregistrées.')) return;
+  if (S.media) S.media.release();
+  $('#screen-app').classList.add('hidden');
+  $('#btn-export').classList.add('hidden');
+  $('#btn-reset').classList.add('hidden');
+  $('#screen-import').classList.remove('hidden');
+  status('');
+  renderResume();
+});
+
+/* clavier */
+document.addEventListener('keydown', e => {
+  if (focusOpen()) {
+    if (e.key === 'Escape') { e.preventDefault(); closeFocus(); return; }
+    if (e.key === 'ArrowRight' || e.key.toLowerCase() === 'g') { e.preventDefault(); focusDecide('keep'); return; }
+    if (e.key === 'ArrowLeft'  || e.key.toLowerCase() === 'r') { e.preventDefault(); focusDecide('remove'); return; }
+    if (e.key === 'ArrowDown'  || e.key.toLowerCase() === 'p') { e.preventDefault(); focusDecide('later'); return; }
+    if (e.key.toLowerCase() === 'z') { e.preventDefault(); focusUndo(); return; }
+    if (e.key.toLowerCase() === 'o') {
+      const it = S.focusList[S.focusIdx];
+      if (it && it.href) window.open(it.href, '_blank', 'noopener');
+      return;
+    }
+    return;
+  }
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target.tagName || '')) || $('#dlg-export').open || $('#dlg-help').open;
+  if (typing) return;
+  if (e.key === '/') { e.preventDefault(); $('#q').focus(); return; }
+  if (e.key.toLowerCase() === 't' && !$('#screen-app').classList.contains('hidden')) { e.preventDefault(); openFocus(); return; }
+  if (e.key.toLowerCase() === 'z' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (undo()) { refreshLight(); toast('Annulé'); } }
+});
+
+/* import : zone de dépôt */
+const dz = $('#dropzone');
+['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, e => {
+  e.preventDefault(); e.stopPropagation(); dz.classList.add('over');
+}));
+['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, e => {
+  e.preventDefault(); e.stopPropagation();
+  if (ev === 'dragleave' && dz.contains(e.relatedTarget)) return;
+  dz.classList.remove('over');
+}));
+dz.addEventListener('drop', async e => {
+  const files = e.dataTransfer && e.dataTransfer.files;
+  if (!files || !files.length) return;
+  try {
+    if (files.length === 1 && /\.zip$/i.test(files[0].name)) await importZip(files[0]);
+    else await importFiles(files);
+  } catch (err) { status('<span style="color:var(--drop)">Erreur de lecture : ' + esc(err.message) + '</span>'); }
+});
+
+$('#pick-zip').addEventListener('click', () => $('#file-zip').click());
+$('#pick-folder').addEventListener('click', () => $('#file-folder').click());
+$('#file-zip').addEventListener('change', async e => {
+  if (!e.target.files.length) return;
+  try { await importZip(e.target.files[0]); }
+  catch (err) { status('<span style="color:var(--drop)">Erreur de lecture : ' + esc(err.message) + '</span>'); }
+});
+$('#file-folder').addEventListener('change', async e => {
+  if (!e.target.files.length) return;
+  try { await importFiles(e.target.files); }
+  catch (err) { status('<span style="color:var(--drop)">Erreur de lecture : ' + esc(err.message) + '</span>'); }
+});
+$('#pick-demo').addEventListener('click', () => boot(demoData(), new MediaStore(), false));
+
+/* bouton de reprise de session */
+function renderResume() {
+  const snap = loadSnapshot();
+  const prev = $('#resume-box');
+  if (prev) prev.remove();
+  if (!snap) return;
+  const when = new Date(snap.at).toLocaleString('fr-FR');
+  const box = document.createElement('div');
+  box.id = 'resume-box';
+  box.style.cssText = 'margin-top:16px;padding:14px 16px;background:var(--bg-2);border:1px solid var(--line);border-radius:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap';
+  box.innerHTML = '<div style="flex:1;min-width:200px;font-size:14px">' +
+    '<b>Session précédente</b><div style="color:var(--txt-2)">' + fmtNum(snap.items.length) +
+    ' éléments, ' + esc(when) + '. Les vignettes nécessitent de recharger l\'archive.</div></div>' +
+    '<button class="btn" id="btn-resume">Reprendre</button>';
+  $('#dropzone').insertAdjacentElement('afterend', box);
+  $('#btn-resume').addEventListener('click', resumeSnapshot);
+}
+
+/* ------------------------------- démarrage ----------------------------- */
+renderResume();
+window.addEventListener('beforeunload', () => { try { localStorage.setItem(LS_DEC, JSON.stringify(S.decisions)); } catch (e) {} });
+</script>
+</body>
+</html>
