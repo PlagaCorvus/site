@@ -572,7 +572,7 @@ function saveDecisions() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     try { localStorage.setItem(LS_DEC, JSON.stringify(S.decisions)); } catch (e) {}
-  }, 250);
+  }, 800);
 }
 
 /* ------------------------------ utilitaires ---------------------------- */
@@ -1248,6 +1248,8 @@ function boot(rawItems, media, hasMedia, report) {
   S.media = media || new MediaStore();
   S.hasMedia = !!hasMedia;
   S.report = Array.isArray(report) ? report : [];
+  S.byId = new Map(S.items.map(i => [i.id, i]));
+  rebuildStats();
   S.selection.clear();
   S.history.length = 0;
   if (!S.items.length) {
@@ -1360,19 +1362,51 @@ function visibleItems() {
 
 /* ------------------------------- décisions ----------------------------- */
 
+function setDecision(id, dec) {
+  const it = S.byId && S.byId.get(id);
+  const prev = S.decisions[id] || null;
+  const next = (prev === dec) ? null : dec;
+  if (next) S.decisions[id] = next; else delete S.decisions[id];
+  if (it) bumpStats(it.type, prev, next);
+  return prev;
+}
+
 function decide(ids, dec, opts) {
   const list = Array.isArray(ids) ? ids : [ids];
   const batch = [];
-  for (const id of list) {
-    const prev = S.decisions[id] || null;
-    if (prev === dec) { delete S.decisions[id]; batch.push([id, prev]); continue; }
-    batch.push([id, prev]);
-    S.decisions[id] = dec;
-  }
+  for (const id of list) batch.push([id, setDecision(id, dec)]);
   if (batch.length) S.history.push(batch);
   if (S.history.length > 400) S.history.shift();
   saveDecisions();
-  if (!opts || !opts.silent) refreshLight();
+  if (opts && opts.silent) return;
+  if (list.length === 1) { paintCounters(); updateCard(list[0]); }
+  else refreshLight();
+}
+
+/* Repeint les seuls compteurs, sans toucher à la grille. */
+function paintCounters() {
+  renderTabs();
+  renderStats();
+  renderChips();
+}
+
+/* Met à jour une carte sur place plutôt que de reconstruire la grille. */
+function updateCard(id) {
+  const el = $('#grid [data-id="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
+  if (!el) return;
+  const dec = S.decisions[id] || null;
+  el.classList.remove('d-keep', 'd-drop', 'd-later');
+  if (dec) el.classList.add('d-' + (dec === 'remove' ? 'drop' : dec));
+  $$('[data-dec]', el).forEach(b => {
+    b.className = (b.dataset.dec === dec)
+      ? 'on ' + (dec === 'keep' ? 'keep' : dec === 'remove' ? 'drop' : 'later')
+      : '';
+  });
+  if (S.status === 'untriaged' && dec) {
+    el.remove();
+    const i = currentList.findIndex(x => x.id === id);
+    if (i >= 0) currentList.splice(i, 1);
+  }
 }
 
 function undo() {
@@ -1381,22 +1415,41 @@ function undo() {
   for (const [id, prev] of batch) {
     if (prev) S.decisions[id] = prev; else delete S.decisions[id];
   }
+  rebuildStats();
   saveDecisions();
   return true;
 }
 
-function decisionStats(type) {
-  const st = { total: 0, keep: 0, remove: 0, later: 0, untriaged: 0 };
+/* Les compteurs sont tenus à jour au fil des décisions. Les recalculer
+   en parcourant 30 000 éléments à chaque clic rendait l'interface lourde,
+   et en mode mur cela rechargeait tous les aperçus. */
+let statsCache = null;
+
+function rebuildStats() {
+  statsCache = {};
   for (const it of S.items) {
-    if (type && it.type !== type) continue;
-    st.total++;
+    const c = statsCache[it.type] ||
+      (statsCache[it.type] = { total: 0, keep: 0, remove: 0, later: 0, untriaged: 0 });
+    c.total++;
     const d = S.decisions[it.id];
-    if (d === 'keep') st.keep++;
-    else if (d === 'remove') st.remove++;
-    else if (d === 'later') st.later++;
-    else st.untriaged++;
+    if (d === 'keep') c.keep++;
+    else if (d === 'remove') c.remove++;
+    else if (d === 'later') c.later++;
+    else c.untriaged++;
   }
-  return st;
+}
+
+function decisionStats(type) {
+  if (!statsCache) rebuildStats();
+  return statsCache[type] || { total: 0, keep: 0, remove: 0, later: 0, untriaged: 0 };
+}
+
+function bumpStats(type, from, to) {
+  if (!statsCache) { rebuildStats(); return; }
+  const c = statsCache[type];
+  if (!c) { rebuildStats(); return; }
+  c[from || 'untriaged']--;
+  c[to || 'untriaged']++;
 }
 
 /* ------------------------------- rendu --------------------------------- */
@@ -1410,10 +1463,7 @@ function renderAll() {
 }
 
 function refreshLight() {
-  renderTabs();
-  renderStats();
-  renderChips();
-  renderAccounts();
+  paintCounters();
   renderGrid();
 }
 
@@ -1611,7 +1661,7 @@ function rowHTML(it) {
     decButtons(it, dec, 'row-acts') + '</div>';
 }
 
-const PAGE_WALL = 24;
+const PAGE_WALL = 12;
 
 function wallHTML(it) {
   const dec = S.decisions[it.id] || null;
@@ -1689,8 +1739,9 @@ function renderGrid() {
     return;
   }
   const banner = wallMode
-    ? '<div class="wnote"><span>Aperçus chargés depuis instagram.com, seulement pour les cartes visibles. ' +
-      'Un cadre resté vide signale une publication privée ou supprimée : le lien reste cliquable.</span></div>'
+    ? '<div class="wnote"><span>Aperçus chargés depuis instagram.com, uniquement pour les cartes proches de l\'écran, ' +
+      'et libérés dès qu\'elles s\'en éloignent. Un cadre resté vide signale une publication privée ou supprimée : ' +
+      'le lien du compte reste cliquable.</span></div>'
     : '';
   grid.innerHTML = banner + currentList.slice(0, pageSize()).map(itemHTML).join('') + sentinel();
   hydrate(grid);
@@ -1725,13 +1776,25 @@ function appendPage() {
   hydrate(grid);
 }
 
+/* Chaque aperçu est une page Instagram complète. On ne garde vivants que
+   ceux proches de l'écran, et on libère les autres : sans cela la mémoire
+   et le processeur montent sans fin au fil du défilement. */
 const frameObserver = new IntersectionObserver(entries => {
   for (const en of entries) {
-    if (!en.isIntersecting) continue;
-    frameObserver.unobserve(en.target);
-    loadFrame(en.target);
+    if (en.isIntersecting) loadFrame(en.target);
+    else unloadFrame(en.target);
   }
-}, { rootMargin: '300px 0px' });
+}, { rootMargin: '700px 0px' });
+
+function unloadFrame(el) {
+  if (!el.dataset.loaded) return;
+  delete el.dataset.loaded;
+  el.textContent = '';
+  const ph = document.createElement('span');
+  ph.className = 'ph';
+  ph.textContent = 'Aperçu libéré · revient en remontant';
+  el.appendChild(ph);
+}
 
 function loadFrame(el) {
   const src = el.dataset.embed;
@@ -1883,8 +1946,9 @@ async function paintFocus() {
 function focusDecide(dec) {
   if (S.focusIdx >= S.focusList.length) return;
   const it = S.focusList[S.focusIdx];
-  S.decisions[it.id] = dec;
-  S.history.push([[it.id, null]]);
+  const prev = S.decisions[it.id] || null;
+  if (prev !== dec) { S.decisions[it.id] = dec; bumpStats(it.type, prev, dec); }
+  S.history.push([[it.id, prev]]);
   saveDecisions();
   S.focusIdx++;
   paintFocus();
@@ -1894,7 +1958,9 @@ function focusUndo() {
   if (S.focusIdx > 0) {
     S.focusIdx--;
     const it = S.focusList[S.focusIdx];
+    const prev = S.decisions[it.id] || null;
     delete S.decisions[it.id];
+    if (prev) bumpStats(it.type, prev, null);
     saveDecisions();
     paintFocus();
   } else { toast('Début de la liste'); }
@@ -2179,8 +2245,17 @@ document.body.addEventListener('click', e => {
   const act = b.dataset.bulk;
   if (act === 'none') { S.selection.clear(); renderGrid(); return; }
   const ids = Array.from(S.selection);
-  for (const id of ids) S.decisions[id] = act;
-  S.history.push(ids.map(id => [id, null]));
+  const batch = [];
+  for (const id of ids) {
+    const prev = S.decisions[id] || null;
+    if (prev !== act) {
+      S.decisions[id] = act;
+      const it = S.byId && S.byId.get(id);
+      if (it) bumpStats(it.type, prev, act);
+    }
+    batch.push([id, prev]);
+  }
+  S.history.push(batch);
   saveDecisions();
   S.selection.clear();
   toast(ids.length + ' élément(s) → ' + DEC_LABEL[act].toLowerCase());
