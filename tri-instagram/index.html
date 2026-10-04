@@ -520,6 +520,7 @@ const S = {
   status: 'untriaged',
   rel: null,                 // filtre propre aux abonnements
   account: null,             // filtre sur un compte précis
+  collection: null,          // filtre sur une collection d'enregistrements
   decisions: loadDecisions(),
   selection: new Set(),
   history: [],
@@ -747,6 +748,7 @@ function pickLinks(entry) {
 }
 
 const POST_LINK = /\/(p|reel|reels|tv|s)\//;
+const NO_COLLECTION = '__sans_collection__';
 const HANDLE = /^[A-Za-z0-9._]{1,30}$/;
 const USER_LABEL = /utilisateur|username|auteur|author|compte|account|profil|owner/i;
 
@@ -871,8 +873,10 @@ function parseSaved(entries) {
    entrée est soit une collection, soit une publication rangée dedans. */
 function parseSavedCollections(entries) {
   const out = [];
-  const seen = new Set();
   for (const e of entries) {
+    // une publication peut figurer dans plusieurs collections : on ne
+    // déduplique qu'à l'intérieur d'une même collection
+    const seen = new Set();
     const map = e.string_map_data || {};
     const f = deepFields(e);
     const named = f.values.find(v => /nom|name|titre|title|collection/i.test(v.label)) || f.values[0];
@@ -952,17 +956,45 @@ function routeFor(path) {
   return null;
 }
 
+/* Une même publication enregistrée figure à la fois dans la liste à plat et
+   dans le fichier des collections. On fusionne sur le permalien, en gardant
+   l'information la plus riche des deux et la liste des collections. */
+function postKey(it) {
+  if (it.type !== 'saved' && it.type !== 'liked') return null;
+  if (!it.href || !POST_LINK.test(it.href)) return null;
+  return it.type + '|' + it.href.replace(/[?#].*$/, '').replace(/\/+$/, '').toLowerCase();
+}
+
 function finalize(items) {
-  const seen = new Set();
+  const byKey = new Map();
   const out = [];
   for (const it of items) {
-    const sig = [it.type, it.href || '', it.user || '', it.ts || 0, (it.uris && it.uris[0]) || '', it.title || ''].join('|');
-    const id = it.type + '-' + hash(sig);
-    if (seen.has(id)) continue;
-    seen.add(id);
-    it.id = id;
-    it.search = ((it.user || '') + ' ' + (it.title || '')).toLowerCase();
+    // idempotent : un second passage ne doit pas effacer les collections
+    if (!Array.isArray(it.collections)) it.collections = [];
+    if (it.collection && it.collections.indexOf(it.collection) < 0) it.collections.push(it.collection);
+    delete it.collection;
+    const key = postKey(it) || ('sig|' + [it.type, it.href || '', it.user || '', it.ts || 0,
+      (it.uris && it.uris[0]) || '', it.title || ''].join('|'));
+    const prev = byKey.get(key);
+    if (prev) {
+      if (!prev.user && it.user) prev.user = it.user;
+      if (!prev.ts && it.ts) prev.ts = it.ts;
+      if (!prev.caption && it.caption) prev.caption = it.caption;
+      if (prev.guessed && !it.guessed) { prev.href = it.href; prev.guessed = false; }
+      for (const c of it.collections) if (c && prev.collections.indexOf(c) < 0) prev.collections.push(c);
+      continue;
+    }
+    byKey.set(key, it);
     out.push(it);
+  }
+  for (const it of out) {
+    if ((it.type === 'saved' || it.type === 'liked') && !it.user && it.collections.length) {
+      it.title = it.collections[0];
+    }
+    it.id = it.type + '-' + hash(postKey(it) || [it.type, it.href || '', it.user || '', it.ts || 0,
+      (it.uris && it.uris[0]) || '', it.title || ''].join('|'));
+    it.search = ((it.user || '') + ' ' + (it.title || '') + ' ' + (it.caption || '') + ' ' +
+      it.collections.join(' ')).toLowerCase();
   }
   return out;
 }
@@ -1203,6 +1235,7 @@ function boot(rawItems, media, hasMedia, report) {
   S.status = 'untriaged';
   S.rel = null;
   S.account = null;
+  S.collection = null;
   S.q = '';
   $('#q').value = '';
   saveSnapshot();
@@ -1218,7 +1251,9 @@ function boot(rawItems, media, hasMedia, report) {
 function saveSnapshot() {
   try {
     if (S.items.length > 24000) { localStorage.removeItem(LS_SNAP); return; }
-    const slim = S.items.map(i => ({ t:i.type, ti:i.title, u:i.user, h:i.href, ts:i.ts, n:i.n || 0 }));
+    const slim = S.items.map(i => ({ t:i.type, ti:i.title, u:i.user, h:i.href, ts:i.ts, n:i.n || 0,
+      c: (i.collections && i.collections.length) ? i.collections : undefined,
+      g: i.guessed ? 1 : undefined }));
     localStorage.setItem(LS_SNAP, JSON.stringify({ at: Date.now(), items: slim }));
   } catch (e) { /* quota dépassé : la reprise ne sera pas disponible */ }
 }
@@ -1236,7 +1271,8 @@ function loadSnapshot() {
 function resumeSnapshot() {
   const snap = loadSnapshot();
   if (!snap) return;
-  const items = snap.items.map(i => ({ type:i.t, title:i.ti, user:i.u, href:i.h, ts:i.ts, n:i.n, uris: [] }));
+  const items = snap.items.map(i => ({ type:i.t, title:i.ti, user:i.u, href:i.h, ts:i.ts, n:i.n, uris: [],
+    collections: Array.isArray(i.c) ? i.c : [], guessed: !!i.g }));
   boot(items, new MediaStore(), false);
   toast('Session précédente reprise (sans les images)');
 }
@@ -1281,6 +1317,9 @@ function visibleItems() {
     if (S.status === 'untriaged' && dec) return false;
     if (['keep', 'remove', 'later'].includes(S.status) && dec !== S.status) return false;
     if (S.account && it.user !== S.account) return false;
+    if (S.collection === NO_COLLECTION) {
+      if (it.collections && it.collections.length) return false;
+    } else if (S.collection && (!it.collections || it.collections.indexOf(S.collection) < 0)) return false;
     if (!relMatch(it)) return false;
     for (const t of terms) if (!it.search.includes(t)) return false;
     return true;
@@ -1400,15 +1439,40 @@ function topAccounts(limit) {
     .slice(0, limit);
 }
 
+function allCollections() {
+  const map = new Map();
+  let withNone = 0;
+  for (const it of S.items) {
+    if (it.type !== S.tab) continue;
+    if (!it.collections || !it.collections.length) { withNone++; continue; }
+    for (const c of it.collections) map.set(c, (map.get(c) || 0) + 1);
+  }
+  return { list: Array.from(map, ([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n || a.name.localeCompare(b.name, 'fr')), withNone };
+}
+
 function renderAccounts() {
   const box = $('#accounts');
-  const list = topAccounts(40);
-  if (list.length < 2) { box.innerHTML = ''; return; }
   const total = S.items.filter(i => i.type === S.tab).length;
-  box.innerHTML =
-    '<button class="chip' + (S.account ? '' : ' active') + '" data-acc="">Tous les comptes · ' + fmtNum(total) + '</button>' +
-    list.map(a => '<button class="chip' + (S.account === a.user ? ' active' : '') + '" data-acc="' + esc(a.user) + '">@' +
-      esc(a.user) + ' · <b>' + fmtNum(a.n) + '</b></button>').join('');
+  const cols = allCollections();
+  const accs = topAccounts(40);
+  let html = '';
+
+  if (cols.list.length) {
+    html += '<button class="chip' + (S.collection ? '' : ' active') + '" data-col="">Toutes les collections · ' + fmtNum(total) + '</button>' +
+      cols.list.map(c => '<button class="chip' + (S.collection === c.name ? ' active' : '') + '" data-col="' + esc(c.name) + '">▸ ' +
+        esc(c.name) + ' · <b>' + fmtNum(c.n) + '</b></button>').join('');
+    if (cols.withNone) {
+      html += '<button class="chip' + (S.collection === NO_COLLECTION ? ' active' : '') +
+        '" data-col="' + NO_COLLECTION + '">Hors collection · <b>' + fmtNum(cols.withNone) + '</b></button>';
+    }
+  }
+  if (accs.length >= 2) {
+    if (html) html += '<span style="flex-basis:100%;height:0"></span>';
+    html += '<button class="chip' + (S.account ? '' : ' active') + '" data-acc="">Tous les comptes · ' + fmtNum(total) + '</button>' +
+      accs.map(a => '<button class="chip' + (S.account === a.user ? ' active' : '') + '" data-acc="' + esc(a.user) + '">@' +
+        esc(a.user) + ' · <b>' + fmtNum(a.n) + '</b></button>').join('');
+  }
+  box.innerHTML = html;
 }
 
 function renderChips() {
@@ -1513,7 +1577,9 @@ function rowHTML(it) {
   if (it.ts) meta.push(fmtDate(it.ts));
   if (it.user && it.title && it.title !== it.user) meta.push(esc(it.title));
   if (dec) meta.push('<span style="color:var(--' + (dec === 'keep' ? 'keep' : dec === 'remove' ? 'drop' : 'later') + ')">' + DEC_LABEL[dec] + '</span>');
-  const badge = relBadge(it);
+  const badge = relBadge(it) + (it.collections && it.collections.length
+    ? '<span class="badge">▸ ' + esc(it.collections.slice(0, 2).join(', ')) +
+      (it.collections.length > 2 ? ' +' + (it.collections.length - 2) : '') + '</span>' : '');
   return '<div class="card row' + (dec ? ' d-' + (dec === 'remove' ? 'drop' : dec) + '' : '') + (sel ? ' sel' : '') + '" data-id="' + it.id + '">' +
     avatarFor(it.user || it.title, 'pick') +
     '<div class="row-main"><div class="row-title">' + title + '</div>' +
@@ -1534,6 +1600,7 @@ function cardHTML(it) {
   if (it.ts) meta.push(fmtDate(it.ts));
   if (dec) meta.push('<span style="color:var(--' + (dec === 'keep' ? 'keep' : dec === 'remove' ? 'drop' : 'later') + ')">' + DEC_LABEL[dec] + '</span>');
   if (it.guessed) meta.push('<span class="badge warn" style="margin:0">lien reconstruit</span>');
+  if (it.collections && it.collections.length) meta.push(esc('▸ ' + it.collections.join(', ')));
   const titleTxt = it.user ? '@' + it.user : (it.title || '(sans titre)');
   const title = it.href
     ? '<a href="' + esc(it.href) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">' + esc(titleTxt) + ' ↗</a>'
@@ -1831,12 +1898,12 @@ function buildExport() {
 
   if (fmt === 'csv') {
     const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-    const lines = [['categorie', 'decision', 'compte', 'titre', 'lien', 'date'].join(',')];
+    const lines = [['categorie', 'decision', 'compte', 'titre', 'lien', 'collections', 'date'].join(',')];
     for (const r of rows) {
       lines.push([
         q(TYPE_LABEL[r.type] || r.type),
         q(DEC_LABEL[S.decisions[r.id]] || 'non trié'),
-        q(r.user || ''), q(r.title || ''), q(r.href || ''),
+        q(r.user || ''), q(r.title || ''), q(r.href || ''), q((r.collections || []).join(' | ')),
         q(r.ts ? new Date(r.ts * 1000).toISOString().slice(0, 10) : ''),
       ].join(','));
     }
@@ -1959,12 +2026,22 @@ $('#tabs').addEventListener('click', e => {
   S.tab = b.dataset.tab;
   S.rel = null;
   S.account = null;
+  S.collection = null;
   S.selection.clear();
   renderAll();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 });
 
 $('#accounts').addEventListener('click', e => {
+  const c = e.target.closest('[data-col]');
+  if (c) {
+    const v = c.dataset.col || null;
+    S.collection = (S.collection === v) ? null : v;
+    S.selection.clear();
+    renderAccounts();
+    renderGrid();
+    return;
+  }
   const b = e.target.closest('[data-acc]');
   if (!b) return;
   const u = b.dataset.acc || null;
