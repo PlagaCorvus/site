@@ -287,6 +287,28 @@ ul.plain li{margin-bottom:6px}
 </head>
 <body>
 
+<div id="boot" style="display:none;background:#2a1112;color:#ffd7d7;border-bottom:1px solid #6b2224;padding:12px 16px;font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"></div>
+<script>
+/* Garde de démarrage, en JavaScript ancien, avant le script principal :
+   si celui-ci est refusé par le navigateur, l'erreur s'affiche quand même. */
+(function () {
+  var b = document.getElementById('boot');
+  function show(html) { if (b) { b.style.display = 'block'; b.innerHTML = html; } }
+  window.__bootError = function (msg, line) {
+    show('<b>Le script n\'a pas pu démarrer.</b> ' + String(msg) + (line ? ' (ligne ' + line + ')' : '') +
+      '<br>Navigateur : ' + navigator.userAgent +
+      '<br>Copiez ce message et envoyez-le. Essayez aussi d\'ouvrir ce fichier avec Chrome, Edge ou Firefox (clic droit, « Ouvrir avec »).');
+  };
+  window.onerror = function (m, src, line) { if (!window.__appStarted) window.__bootError(m, line); };
+  setTimeout(function () {
+    if (!window.__appStarted) {
+      show('<b>Le script ne s\'est pas lancé après 4 secondes.</b> Navigateur : ' + navigator.userAgent +
+        '<br>Ouvrez ce fichier avec Chrome, Edge ou Firefox (clic droit, « Ouvrir avec »). Copiez ce message et envoyez-le.');
+    }
+  }, 4000);
+})();
+</script>
+
 <div class="topbar">
   <div class="wrap topbar-in">
     <div class="brand"><span class="dot"></span><span>Tri Instagram<small>Tout se passe sur votre appareil · v<span id="ver"></span></small></span></div>
@@ -528,7 +550,7 @@ const TYPES = [
 ];
 const TYPE_LABEL = Object.fromEntries(TYPES.map(t => [t.key, t.label]));
 const DEC_LABEL = { keep:'Gardé', remove:'À retirer', later:'Plus tard' };
-const APP_VERSION = '2.0';
+const APP_VERSION = '2.1';
 const LS_DEC = 'tri-ig:decisions';
 const ARCHIVE_EXT = /\.(zip|rar|7z|gz|tgz|tar|bz2|xz)$/i;
 const LS_SNAP = 'tri-ig:snapshot';
@@ -864,7 +886,8 @@ function idToShortcode(id) {
   let n;
   try { n = BigInt(id); } catch (e) { return ''; }
   let out = '';
-  while (n > 0n) { out = A[Number(n % 64n)] + out; n = n / 64n; }
+  const Z = BigInt(0), B = BigInt(64);
+  while (n > Z) { out = A[Number(n % B)] + out; n = n / B; }
   return out.length >= 8 ? out : '';
 }
 
@@ -2521,7 +2544,8 @@ function envLine() {
   if (typeof DecompressionStream === 'undefined') caps.push('décompression indisponible');
   try { localStorage.setItem('tri-ig:t', '1'); localStorage.removeItem('tri-ig:t'); } catch (e) { caps.push('stockage local bloqué'); }
   if (!window.indexedDB) caps.push('base locale indisponible');
-  let html = 'Version ' + APP_VERSION + ' · ' + esc(how) + ' · ' + esc(browserName());
+  const t = (window.performance && performance.now) ? ' · démarré en ' + Math.round(performance.now()) + ' ms' : '';
+  let html = 'Version ' + APP_VERSION + ' · ' + esc(how) + ' · ' + esc(browserName()) + t;
   if (caps.length) html += ' · <span style="color:var(--drop)">' + esc(caps.join(', ')) + '</span>';
   if (framed && !EMBEDDED) {
     html += '<br><span style="color:var(--drop)">Cette page est affichée dans un aperçu intégré : les boutons peuvent y rester inactifs. ' +
@@ -2544,11 +2568,14 @@ window.addEventListener('unhandledrejection', e => {
 });
 
 /* ------------------------------- démarrage ----------------------------- */
-envLine();
+window.__appStarted = true;
+(function () { const b = $('#boot'); if (b) b.style.display = 'none'; })();
 if ($('#ver')) $('#ver').textContent = APP_VERSION;
-mergeDecisionsFromIdb();
+envLine();
+/* Le travail sur la base locale attend le premier affichage. */
+setTimeout(() => { try { mergeDecisionsFromIdb(); } catch (e) {} }, 60);
 paintPrevBtn();
-renderResume();
+setTimeout(() => { try { renderResume(); } catch (e) {} }, 80);
 window.addEventListener('beforeunload', () => { try { localStorage.setItem(LS_DEC, JSON.stringify(S.decisions)); } catch (e) {} });
 </script>
 </body>
