@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tri Instagram — Plaga Corvus</title>
+<title>Tri Instagram</title>
 <meta name="description" content="Application locale pour trier facilement sa bibliothèque Instagram : publications, enregistrements, j'aime, abonnements. Tout reste sur votre appareil.">
 <style>
 :root{
@@ -19,6 +19,7 @@
   --later:#58a6ff;
   --radius:14px;
   --shadow:0 10px 30px rgba(0,0,0,.45);
+  color-scheme:dark;
 }
 *{box-sizing:border-box}
 html,body{height:100%}
@@ -35,7 +36,7 @@ a{color:var(--accent)}
 
 /* ---------- top bar ---------- */
 .topbar{
-  position:sticky;top:0;z-index:50;background:rgba(11,11,13,.92);
+  position:sticky;top:env(safe-area-inset-top,0px);z-index:50;background:rgba(11,11,13,.92);
   backdrop-filter:blur(10px);border-bottom:1px solid var(--line);
 }
 .topbar-in{display:flex;align-items:center;gap:12px;height:60px}
@@ -395,7 +396,7 @@ ul.plain li{margin-bottom:6px}
   </div>
   <div class="dlg-foot">
     <button class="btn" id="exp-copy">Copier</button>
-    <button class="btn primary" id="exp-dl">Télécharger</button>
+    <button class="btn primary" id="exp-dl">Enregistrer le fichier</button>
   </div>
 </dialog>
 
@@ -534,6 +535,12 @@ function saveDecisions() {
 
 /* ------------------------------ utilitaires ---------------------------- */
 
+/* La page tourne soit comme fichier autonome, soit intégrée dans une page
+   claude.ai. Intégrée, elle ne peut pas afficher d'iframe vers instagram.com,
+   et l'enregistrement de fichiers passe par l'hôte. */
+const EMBEDDED = typeof window.claude === 'object' && window.claude !== null
+  && typeof window.claude.use === 'function';
+
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
@@ -586,8 +593,23 @@ function toast(msg) {
   toast._t = setTimeout(() => t.classList.remove('show'), 1900);
 }
 
-function download(name, text, mime) {
+async function download(name, text, mime) {
   const blob = new Blob([text], { type: (mime || 'text/plain') + ';charset=utf-8' });
+  if (EMBEDDED) {
+    let saver = null;
+    try { saver = await window.claude.use('downloads'); } catch (e) { saver = null; }
+    if (saver) {
+      try { await saver.save({ filename: name, data: blob }); toast('Fichier enregistré'); }
+      catch (err) {
+        const code = err && err.code;
+        if (code === 'declined') toast('Enregistrement annulé');
+        else toast('Enregistrement impossible ici : utilisez « Copier »');
+      }
+      return;
+    }
+    toast('Enregistrement indisponible ici : utilisez « Copier »');
+    return;
+  }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = name;
@@ -1477,7 +1499,9 @@ async function paintFocus() {
     '<div class="idname">' + esc(name) + '</div>' +
     '<div class="idsub">' + esc(sub.join(' · ')) + '</div>' +
     (relBadge(it) ? '<div style="margin-top:8px">' + relBadge(it) + '</div>' : '') +
-    (emb && !S.previews ? '<div style="margin-top:12px"><button class="linkbtn" data-prev-ask="1">Afficher l\'aperçu de la publication</button></div>' : '') +
+    (emb && !S.previews ? (EMBEDDED
+        ? '<div class="idsub" style="margin-top:10px;max-width:320px;margin-left:auto;margin-right:auto">Les aperçus ne fonctionnent pas dans cette page intégrée. Ouvrez la publication, ou utilisez le fichier à télécharger.</div>'
+        : '<div style="margin-top:12px"><button class="linkbtn" data-prev-ask="1">Afficher l\'aperçu de la publication</button></div>') : '') +
     '</div>';
 }
 
@@ -1712,6 +1736,7 @@ $('#sort').addEventListener('change', e => { S.sort = e.target.value; renderGrid
 
 function paintPrevBtn() {
   const b = $('#btn-prev');
+  if (EMBEDDED) { b.classList.add('hidden'); return; }
   b.textContent = '👁 Aperçus : ' + (S.previews ? 'oui' : 'non');
   b.classList.toggle('on', S.previews);
 }
@@ -1756,7 +1781,6 @@ $('#exp-dl').addEventListener('click', () => {
 
 $('#btn-help').addEventListener('click', () => $('#dlg-help').showModal());
 $('#btn-reset').addEventListener('click', () => {
-  if (!confirm('Revenir à l\'écran d\'import ? Vos décisions restent enregistrées.')) return;
   if (S.media) S.media.release();
   $('#screen-app').classList.add('hidden');
   $('#btn-export').classList.add('hidden');
@@ -1775,8 +1799,8 @@ document.addEventListener('keydown', e => {
     if (e.key === 'ArrowDown'  || e.key.toLowerCase() === 'p') { e.preventDefault(); focusDecide('later'); return; }
     if (e.key.toLowerCase() === 'z') { e.preventDefault(); focusUndo(); return; }
     if (e.key.toLowerCase() === 'o') {
-      const it = S.focusList[S.focusIdx];
-      if (it && it.href) window.open(it.href, '_blank', 'noopener');
+      const a = $('#focus-link');
+      if (a && !a.classList.contains('hidden') && a.href) a.click();
       return;
     }
     return;
