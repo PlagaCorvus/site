@@ -29,6 +29,7 @@ body{
 }
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer;border:none;background:none}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
 a{color:var(--accent)}
 .wrap{max-width:1180px;margin:0 auto;padding:0 16px}
 
@@ -53,6 +54,8 @@ a{color:var(--accent)}
 .btn.primary:hover{background:#ffc53d}
 .btn.ghost{background:transparent}
 .btn.sm{padding:6px 10px;font-size:13px;border-radius:8px}
+.btn.on{border-color:var(--accent);color:var(--accent);background:#1b1708}
+.linkbtn{background:none;border:none;color:var(--accent);font-size:13px;font-weight:600;text-decoration:underline;padding:0}
 .btn[disabled]{opacity:.4;cursor:not-allowed}
 
 /* ---------- import ---------- */
@@ -98,6 +101,9 @@ a{color:var(--accent)}
 .search input::placeholder{color:#6a6a78}
 select.sel{background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:9px 11px;font-size:14px;outline:none}
 .chips{display:flex;gap:6px;flex-wrap:wrap;padding-bottom:12px}
+#accounts{padding-bottom:14px;max-height:104px;overflow:auto}
+#accounts .chip{font-weight:500}
+#accounts .chip b{font-weight:700;font-variant-numeric:tabular-nums}
 .chip{padding:6px 11px;border-radius:999px;background:var(--bg-2);border:1px solid var(--line);
   font-size:13px;color:var(--txt-2);font-weight:600}
 .chip.active{border-color:var(--accent);color:var(--accent);background:#1b1708}
@@ -174,6 +180,8 @@ select.sel{background:var(--bg-2);border:1px solid var(--line);border-radius:10p
 }
 .focus-media img,.focus-media video{width:100%;height:100%;object-fit:contain;background:#000}
 .focus-media .ph{font-size:52px;opacity:.25}
+.focus-media.embed{aspect-ratio:auto;height:min(66vh,640px);padding:0;background:#fff;display:block}
+.focus-media.embed iframe{width:100%;height:100%;border:0;display:block;background:#fff}
 .focus-media.ident{aspect-ratio:auto;min-height:190px;padding:26px 18px}
 .ident-box{text-align:center}
 .ident-box .avatar{width:84px;height:84px;border-radius:50%;display:grid;place-items:center;
@@ -264,7 +272,7 @@ ul.plain li{margin-bottom:6px}
   <div class="hero">
     <h1>Triez votre bibliothèque Instagram, tranquillement</h1>
     <p>Chargez l'archive de vos données Instagram et passez vos publications, enregistrements, j'aime et abonnements un par un. Vous décidez : garder, retirer, ou voir plus tard.</p>
-    <span class="badge-safe">● Aucun envoi réseau, aucun mot de passe, 100 % hors ligne</span>
+    <span class="badge-safe">● Aucun compte, aucun mot de passe : votre archive reste sur votre appareil</span>
   </div>
 
   <div class="drop" id="dropzone">
@@ -315,10 +323,13 @@ ul.plain li{margin-bottom:6px}
       <option value="title-asc">Nom (A→Z)</option>
       <option value="title-desc">Nom (Z→A)</option>
     </select>
+    <button class="btn" id="btn-selall">☑ Tout sélectionner</button>
+    <button class="btn" id="btn-prev" title="Afficher les publications enregistrées via le lecteur Instagram">👁 Aperçus : non</button>
     <button class="btn primary" id="btn-focus">▶ Mode tri rapide</button>
   </div>
 
   <div class="chips" id="chips"></div>
+  <div class="chips" id="accounts"></div>
 
   <div class="grid" id="grid"></div>
 </section>
@@ -370,6 +381,7 @@ ul.plain li{margin-bottom:6px}
       </select>
       <select class="sel" id="exp-fmt">
         <option value="links">Liste de liens</option>
+        <option value="html">Page HTML à garder sur le PC</option>
         <option value="csv">CSV (tableur)</option>
         <option value="json">JSON (sauvegarde)</option>
       </select>
@@ -377,11 +389,35 @@ ul.plain li{margin-bottom:6px}
     <textarea class="out" id="exp-out" readonly></textarea>
     <p style="font-size:13px;color:var(--txt-2);margin:12px 0 0">
       Instagram ne permet pas de supprimer en masse depuis l'extérieur. Cette liste est votre feuille de route :
-      ouvrez chaque lien, agissez dans l'application, et cochez au fur et à mesure.</p>
+      ouvrez chaque lien, agissez dans l'application, et cochez au fur et à mesure.<br>
+      La <b>page HTML</b> est une copie consultable de votre bibliothèque à garder sur votre ordinateur :
+      elle liste vos enregistrements avec un filtre de recherche, et affiche chaque publication à la demande.</p>
   </div>
   <div class="dlg-foot">
     <button class="btn" id="exp-copy">Copier</button>
     <button class="btn primary" id="exp-dl">Télécharger</button>
+  </div>
+</dialog>
+
+<dialog id="dlg-prev">
+  <div class="dlg-head"><h3>Activer les aperçus Instagram</h3><div class="spacer"></div>
+    <button class="btn sm ghost" onclick="document.getElementById('dlg-prev').close()">✕</button></div>
+  <div class="dlg-body">
+    <p style="margin-top:0">Votre archive ne contient pas les images des publications que vous avez enregistrées :
+      elles appartiennent à d'autres comptes, Instagram ne les inclut pas. Seuls vos propres médias sont dans l'archive.</p>
+    <p>Les aperçus affichent chaque publication enregistrée grâce au lecteur public d'Instagram, celui utilisé par les sites
+      qui intègrent une publication. Vous voyez alors l'image ou la vidéo pendant le tri.</p>
+    <p><b>Ce que cela change :</b></p>
+    <ul class="plain">
+      <li>La page contacte <b>instagram.com</b> pour charger chaque aperçu. Instagram voit donc quelles publications vous consultez.</li>
+      <li>Aucune donnée de votre archive n'est envoyée, et aucune connexion à votre compte n'est demandée.</li>
+      <li>Les publications des comptes privés et celles qui ont été supprimées ne s'affichent pas.</li>
+      <li>Vous pouvez désactiver les aperçus à tout moment, le réglage est retenu.</li>
+    </ul>
+  </div>
+  <div class="dlg-foot">
+    <button class="btn" onclick="document.getElementById('dlg-prev').close()">Rester hors ligne</button>
+    <button class="btn primary" id="prev-on">Activer les aperçus</button>
   </div>
 </dialog>
 
@@ -402,6 +438,13 @@ ul.plain li{margin-bottom:6px}
       <li><b>Grille</b> : vue d'ensemble, sélection multiple avec un clic sur la vignette, puis action groupée.</li>
       <li>Filtres : non triés, gardés, à retirer, plus tard. Plus les filtres propres aux abonnements.</li>
     </ul>
+    <h4 style="margin:18px 0 8px">Voir les images des publications enregistrées</h4>
+    <ul class="plain">
+      <li>L'archive contient vos propres photos et vidéos, mais pas celles des publications que vous avez enregistrées : elles appartiennent à d'autres comptes.</li>
+      <li>Le bouton <b>Aperçus</b> affiche ces publications via le lecteur public d'Instagram. La page contacte alors instagram.com.</li>
+      <li>Désactivé par défaut. Les comptes privés et les publications supprimées ne s'affichent pas.</li>
+    </ul>
+
     <h4 style="margin:18px 0 8px">Agir ensuite</h4>
     <ul class="plain">
       <li><b>Exporter</b> produit la liste des liens correspondant à vos décisions.</li>
@@ -458,6 +501,7 @@ const S = {
   sort: 'date-desc',
   status: 'untriaged',
   rel: null,                 // filtre propre aux abonnements
+  account: null,             // filtre sur un compte précis
   decisions: loadDecisions(),
   selection: new Set(),
   history: [],
@@ -466,7 +510,15 @@ const S = {
   focusList: [],
   focusIdx: 0,
   hasMedia: false,
+  previews: loadFlag('tri-ig:previews'),
 };
+
+function loadFlag(key) {
+  try { return localStorage.getItem(key) === '1'; } catch (e) { return false; }
+}
+function saveFlag(key, val) {
+  try { localStorage.setItem(key, val ? '1' : '0'); } catch (e) {}
+}
 
 function loadDecisions() {
   try { return JSON.parse(localStorage.getItem(LS_DEC) || '{}') || {}; }
@@ -913,6 +965,7 @@ function boot(rawItems, media, hasMedia) {
   S.tab = (TYPES.find(t => counts[t.key]) || TYPES[0]).key;
   S.status = 'untriaged';
   S.rel = null;
+  S.account = null;
   S.q = '';
   $('#q').value = '';
   saveSnapshot();
@@ -989,6 +1042,7 @@ function visibleItems() {
     const dec = S.decisions[it.id] || null;
     if (S.status === 'untriaged' && dec) return false;
     if (['keep', 'remove', 'later'].includes(S.status) && dec !== S.status) return false;
+    if (S.account && it.user !== S.account) return false;
     if (!relMatch(it)) return false;
     for (const t of terms) if (!it.search.includes(t)) return false;
     return true;
@@ -1050,6 +1104,7 @@ function renderAll() {
   renderTabs();
   renderStats();
   renderChips();
+  renderAccounts();
   renderGrid();
 }
 
@@ -1057,6 +1112,7 @@ function refreshLight() {
   renderTabs();
   renderStats();
   renderChips();
+  renderAccounts();
   renderGrid();
 }
 
@@ -1090,6 +1146,31 @@ function renderStats() {
     '<span><i class="sw" style="background:var(--drop)"></i>À retirer <b>' + fmtNum(st.remove) + '</b></span>' +
     '<span><i class="sw" style="background:var(--later)"></i>Plus tard <b>' + fmtNum(st.later) + '</b></span>' +
     '<span><i class="sw" style="background:var(--bg-3)"></i>Non triés <b>' + fmtNum(st.untriaged) + '</b></span>';
+}
+
+function topAccounts(limit) {
+  const map = new Map();
+  for (const it of S.items) {
+    if (it.type !== S.tab || !it.user) continue;
+    const e = map.get(it.user) || { n: 0, un: 0 };
+    e.n++;
+    if (!S.decisions[it.id]) e.un++;
+    map.set(it.user, e);
+  }
+  return Array.from(map, ([user, e]) => ({ user, n: e.n, un: e.un }))
+    .sort((a, b) => b.n - a.n || a.user.localeCompare(b.user, 'fr'))
+    .slice(0, limit);
+}
+
+function renderAccounts() {
+  const box = $('#accounts');
+  const list = topAccounts(40);
+  if (list.length < 2) { box.innerHTML = ''; return; }
+  const total = S.items.filter(i => i.type === S.tab).length;
+  box.innerHTML =
+    '<button class="chip' + (S.account ? '' : ' active') + '" data-acc="">Tous les comptes · ' + fmtNum(total) + '</button>' +
+    list.map(a => '<button class="chip' + (S.account === a.user ? ' active' : '') + '" data-acc="' + esc(a.user) + '">@' +
+      esc(a.user) + ' · <b>' + fmtNum(a.n) + '</b></button>').join('');
 }
 
 function renderChips() {
@@ -1146,6 +1227,13 @@ async function loadThumb(el) {
   }
 }
 
+/* Lecteur public d'Instagram : même mécanisme que l'intégration d'une
+   publication sur un site. Ne fonctionne que pour les comptes publics. */
+function embedUrl(it) {
+  const m = String(it.href || '').match(/instagram\.com\/(?:p|reel|reels|tv)\/([A-Za-z0-9_-]+)/);
+  return m ? 'https://www.instagram.com/p/' + m[1] + '/embed/captioned/' : null;
+}
+
 function avatarFor(name, cls) {
   const txt = String(name || '?').replace(/^@/, '');
   const letter = (txt.match(/[\p{L}\p{N}]/u) || ['?'])[0].toUpperCase();
@@ -1165,7 +1253,8 @@ function relBadge(it) {
 }
 
 function decButtons(it, dec, cls) {
-  return '<div class="' + cls + '">' +
+  const eye = (S.previews && embedUrl(it)) ? '<button data-see="1" title="Voir la publication">👁</button>' : '';
+  return '<div class="' + cls + '">' + eye +
     '<button data-dec="remove" class="' + (dec === 'remove' ? 'on drop' : '') + '" title="À retirer">✕</button>' +
     '<button data-dec="later" class="' + (dec === 'later' ? 'on later' : '') + '" title="Plus tard">★</button>' +
     '<button data-dec="keep" class="' + (dec === 'keep' ? 'on keep' : '') + '" title="Garder">✓</button>' +
@@ -1284,7 +1373,16 @@ const pageObserver = new IntersectionObserver(entries => {
   }
 }, { rootMargin: '600px 0px' });
 
+function paintSelAll() {
+  const b = $('#btn-selall');
+  if (!b) return;
+  const all = currentList.length > 0 && currentList.every(it => S.selection.has(it.id));
+  b.textContent = all ? '☐ Tout désélectionner' : '☑ Tout sélectionner';
+  b.classList.toggle('on', all);
+}
+
 function renderSelBar() {
+  paintSelAll();
   const old = $('#selbar');
   if (old) old.remove();
   if (!S.selection.size) return;
@@ -1301,10 +1399,11 @@ function renderSelBar() {
 
 /* ---------------------------- mode tri rapide -------------------------- */
 
-function openFocus() {
+function openFocus(startId) {
   S.focusList = visibleItems();
   if (!S.focusList.length) { toast('Aucun élément à trier avec ces filtres'); return; }
-  S.focusIdx = 0;
+  const at = startId ? S.focusList.findIndex(i => i.id === startId) : 0;
+  S.focusIdx = at >= 0 ? at : 0;
   $('#focus').classList.remove('hidden');
   document.body.style.overflow = 'hidden';
   paintFocus();
@@ -1330,7 +1429,8 @@ async function paintFocus() {
   const it = S.focusList[S.focusIdx];
   $('#focus-count').textContent = fmtNum(S.focusIdx + 1) + ' / ' + fmtNum(S.focusList.length);
   $('#focus-title').textContent = it.user ? '@' + it.user : (it.title || '(sans titre)');
-  $('#focus-title').classList.toggle('hidden', !(it.uris && it.uris[0] && S.media && S.media.has(it.uris[0])));
+  const ownMedia = !!(it.uris && it.uris[0] && S.media && S.media.has(it.uris[0]));
+  $('#focus-title').classList.toggle('hidden', !ownMedia && !(S.previews && embedUrl(it)));
   const bits = [];
   bits.push(TYPE_LABEL[it.type] || it.type);
   if (it.ts) bits.push(fmtDate(it.ts));
@@ -1358,6 +1458,14 @@ async function paintFocus() {
     }
     return;
   }
+  const emb = embedUrl(it);
+  if (S.previews && emb) {
+    box.className = 'focus-media embed';
+    box.innerHTML = '<iframe src="' + esc(emb) + '" loading="lazy" title="Publication Instagram" ' +
+      'referrerpolicy="origin-when-cross-origin" ' +
+      'sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"></iframe>';
+    return;
+  }
   // pas d'image dans l'export : afficher une fiche lisible plutôt qu'un cadre vide
   box.className = 'focus-media ident';
   const name = it.user ? '@' + it.user : (it.title || '(sans titre)');
@@ -1369,6 +1477,7 @@ async function paintFocus() {
     '<div class="idname">' + esc(name) + '</div>' +
     '<div class="idsub">' + esc(sub.join(' · ')) + '</div>' +
     (relBadge(it) ? '<div style="margin-top:8px">' + relBadge(it) + '</div>' : '') +
+    (emb && !S.previews ? '<div style="margin-top:12px"><button class="linkbtn" data-prev-ask="1">Afficher l\'aperçu de la publication</button></div>' : '') +
     '</div>';
 }
 
@@ -1424,6 +1533,58 @@ function buildExport() {
     return { text: JSON.stringify(payload, null, 2), name: 'tri-instagram-sauvegarde.json', mime: 'application/json' };
   }
 
+  if (fmt === 'html') {
+    const esc2 = esc;
+    const cards = rows.map(r => {
+      const emb = embedUrl(r);
+      const name = r.user ? '@' + r.user : (r.title || 'Sans titre');
+      const d = S.decisions[r.id];
+      const bits = [];
+      if (r.ts) bits.push(fmtDate(r.ts));
+      if (d) bits.push(DEC_LABEL[d]);
+      if (r.user && r.title && r.title !== r.user) bits.push(r.title);
+      return '<article class="c" data-s="' + esc2((name + ' ' + (r.title || '')).toLowerCase()) + '">' +
+        '<h2>' + (r.href ? '<a href="' + esc2(r.href) + '" target="_blank" rel="noopener noreferrer">' + esc2(name) + '</a>' : esc2(name)) + '</h2>' +
+        '<p class="m">' + esc2(bits.join(' · ')) + '</p>' +
+        (emb ? '<button class="v" data-e="' + esc2(emb) + '">Afficher l\'aperçu</button><div class="f"></div>' : '') +
+        '</article>';
+    }).join('');
+    const doc = '<!DOCTYPE html>\n<html lang="fr"><head><meta charset="utf-8">' +
+      '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+      '<title>Ma bibliothèque Instagram</title><style>' +
+      ':root{color-scheme:dark}' +
+      'body{margin:0;background:#0b0b0d;color:#f2f2f4;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.5}' +
+      '.w{max-width:1100px;margin:0 auto;padding:24px 16px 48px}' +
+      'h1{font-size:22px;margin:0 0 6px}.sub{color:#a0a0ad;font-size:14px;margin:0 0 18px}' +
+      '#q{width:100%;max-width:420px;padding:10px 12px;border-radius:10px;border:1px solid #2a2a33;background:#141418;color:inherit;font-size:15px;margin-bottom:18px}' +
+      '.g{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}' +
+      '.c{background:#141418;border:1px solid #2a2a33;border-radius:12px;padding:12px 14px;min-width:0}' +
+      '.c h2{font-size:15px;margin:0 0 4px;word-break:break-word}.c a{color:#f0b429;text-decoration:none}.c a:hover{text-decoration:underline}' +
+      '.m{color:#a0a0ad;font-size:12.5px;margin:0 0 10px}' +
+      '.v{background:#1c1c22;border:1px solid #2a2a33;color:#f2f2f4;border-radius:8px;padding:7px 11px;font-size:13px;font-weight:600;cursor:pointer}' +
+      '.v:hover{background:#262630}.f iframe{width:100%;height:540px;border:0;border-radius:10px;margin-top:10px;background:#fff}' +
+      '.note{color:#a0a0ad;font-size:13px;margin-top:26px;border-top:1px solid #2a2a33;padding-top:14px}' +
+      '</style></head><body><div class="w">' +
+      '<h1>Ma bibliothèque Instagram</h1>' +
+      '<p class="sub">' + rows.length + ' élément(s) · ' + esc2(scopeLabel) + ' · ' + esc2(decLabel) +
+      ' · exporté le ' + esc2(new Date().toLocaleString('fr-FR')) + '</p>' +
+      '<input id="q" type="search" placeholder="Filtrer par compte ou légende…">' +
+      '<div class="g">' + cards + '</div>' +
+      '<p class="note">Les aperçus se chargent depuis instagram.com quand vous cliquez, et seulement à ce moment. ' +
+      'Les publications des comptes privés ou supprimées ne s\'affichent pas. Les liens ouvrent la publication dans Instagram.</p>' +
+      '</div><scr' + 'ipt>' +
+      'document.getElementById("q").addEventListener("input",function(e){' +
+      'var v=e.target.value.toLowerCase();' +
+      'document.querySelectorAll(".c").forEach(function(c){c.style.display=c.dataset.s.indexOf(v)<0?"none":""})});' +
+      'document.addEventListener("click",function(e){var b=e.target.closest(".v");if(!b)return;' +
+      'var f=b.nextElementSibling;if(f.firstChild){f.innerHTML="";b.textContent="Afficher l\u2019aper\u00e7u";return}' +
+      'var i=document.createElement("iframe");i.src=b.dataset.e;i.loading="lazy";' +
+      'i.setAttribute("sandbox","allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox");' +
+      'f.appendChild(i);b.textContent="Masquer l\u2019aper\u00e7u"});' +
+      '</scr' + 'ipt></body></html>';
+    return { text: doc, name: 'ma-bibliotheque-instagram.html', mime: 'text/html' };
+  }
+
   if (fmt === 'csv') {
     const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
     const lines = [['categorie', 'decision', 'compte', 'titre', 'lien', 'date'].join(',')];
@@ -1477,9 +1638,30 @@ $('#tabs').addEventListener('click', e => {
   if (!b) return;
   S.tab = b.dataset.tab;
   S.rel = null;
+  S.account = null;
   S.selection.clear();
   renderAll();
   window.scrollTo({ top: 0, behavior: 'smooth' });
+});
+
+$('#accounts').addEventListener('click', e => {
+  const b = e.target.closest('[data-acc]');
+  if (!b) return;
+  const u = b.dataset.acc || null;
+  S.account = (S.account === u) ? null : u;
+  S.selection.clear();
+  renderAccounts();
+  renderGrid();
+});
+
+$('#btn-selall').addEventListener('click', () => {
+  const all = currentList.every(it => S.selection.has(it.id));
+  if (all || !currentList.length) { S.selection.clear(); toast('Sélection vidée'); }
+  else {
+    for (const it of currentList) S.selection.add(it.id);
+    toast(fmtNum(S.selection.size) + ' élément(s) sélectionné(s)');
+  }
+  renderGrid();
 });
 
 $('#chips').addEventListener('click', e => {
@@ -1498,6 +1680,7 @@ $('#grid').addEventListener('click', e => {
     decide(id, btn.dataset.dec);
     return;
   }
+  if (e.target.closest('[data-see]')) { openFocus(id); return; }
   if (e.target.closest('a')) return;
   if (e.target.closest('.pick') || e.target.closest('.row-main')) {
     if (S.selection.has(id)) S.selection.delete(id); else S.selection.add(id);
@@ -1527,7 +1710,32 @@ $('#q').addEventListener('input', e => {
 });
 $('#sort').addEventListener('change', e => { S.sort = e.target.value; renderGrid(); });
 
-$('#btn-focus').addEventListener('click', openFocus);
+function paintPrevBtn() {
+  const b = $('#btn-prev');
+  b.textContent = '👁 Aperçus : ' + (S.previews ? 'oui' : 'non');
+  b.classList.toggle('on', S.previews);
+}
+function setPreviews(on) {
+  S.previews = !!on;
+  saveFlag('tri-ig:previews', S.previews);
+  paintPrevBtn();
+  renderGrid();
+  if (focusOpen()) paintFocus();
+}
+$('#btn-prev').addEventListener('click', () => {
+  if (S.previews) { setPreviews(false); toast('Aperçus désactivés'); return; }
+  $('#dlg-prev').showModal();
+});
+$('#prev-on').addEventListener('click', () => {
+  $('#dlg-prev').close();
+  setPreviews(true);
+  toast('Aperçus activés');
+});
+document.body.addEventListener('click', e => {
+  if (e.target.closest('[data-prev-ask]')) $('#dlg-prev').showModal();
+});
+
+$('#btn-focus').addEventListener('click', () => openFocus());
 $('#focus-close').addEventListener('click', closeFocus);
 $('#f-keep').addEventListener('click', () => focusDecide('keep'));
 $('#f-drop').addEventListener('click', () => focusDecide('remove'));
@@ -1632,6 +1840,7 @@ function renderResume() {
 }
 
 /* ------------------------------- démarrage ----------------------------- */
+paintPrevBtn();
 renderResume();
 window.addEventListener('beforeunload', () => { try { localStorage.setItem(LS_DEC, JSON.stringify(S.decisions)); } catch (e) {} });
 </script>
