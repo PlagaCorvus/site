@@ -691,24 +691,73 @@ class MediaStore {
 
 /* ---------------------------- analyse de l'export ---------------------- */
 
+/* Les exports Instagram changent de structure d'une version à l'autre :
+   tableau à la racine, tableau sous une clé, ou tableau imbriqué plus bas.
+   On cherche donc le tableau d'objets le moins profond, le plus grand à
+   profondeur égale. */
 function entriesOf(json) {
-  if (Array.isArray(json)) return json;
-  if (json && typeof json === 'object') {
-    for (const k of Object.keys(json)) if (Array.isArray(json[k])) return json[k];
-  }
-  return [];
+  let best = null, bestDepth = Infinity;
+  (function walk(v, depth) {
+    if (!v || typeof v !== 'object' || depth > 6) return;
+    if (Array.isArray(v)) {
+      if (v.length && typeof v[0] === 'object' && v[0] !== null) {
+        if (depth < bestDepth || (depth === bestDepth && best && v.length > best.length)) {
+          best = v; bestDepth = depth;
+        }
+      }
+      return;
+    }
+    for (const k of Object.keys(v)) walk(v[k], depth + 1);
+  })(json, 0);
+  return best || [];
 }
+
+/* Décrit la forme d'un fichier, pour le rapport : c'est ce qui permet de
+   distinguer « vraiment vide » de « structure que je ne sais pas lire ». */
+function describeShape(json, depth) {
+  const d = depth || 0;
+  if (json === null) return 'null';
+  if (Array.isArray(json)) {
+    if (!json.length) return 'tableau vide';
+    return 'tableau(' + json.length + ')' + (d < 2 ? ' de ' + describeShape(json[0], d + 1) : '');
+  }
+  if (typeof json !== 'object') return typeof json;
+  const keys = Object.keys(json);
+  if (!keys.length) return 'objet vide';
+  if (d >= 2) return 'objet{' + keys.slice(0, 4).join(', ') + '}';
+  return '{ ' + keys.slice(0, 6).map(k => k + ': ' + describeShape(json[k], d + 1)).join(', ') +
+    (keys.length > 6 ? ', …' : '') + ' }';
+}
+
+/* Toutes les valeurs d'une entrée pouvant porter un lien, une étiquette ou
+   une date, quelle que soit la forme employée par l'export. */
+function pickLinks(entry) {
+  const out = [];
+  const add = d => { if (d && typeof d === 'object' && (d.href || d.value)) out.push(d); };
+  if (Array.isArray(entry.string_list_data)) entry.string_list_data.forEach(add);
+  if (entry.string_map_data && typeof entry.string_map_data === 'object') {
+    Object.values(entry.string_map_data).forEach(add);
+  }
+  if (entry.href || entry.uri) {
+    add({ href: entry.href || entry.uri, value: entry.value || entry.title,
+          timestamp: entry.timestamp || entry.creation_timestamp });
+  }
+  if (Array.isArray(entry.media)) entry.media.forEach(m => add({ href: m.href || m.uri, timestamp: m.creation_timestamp }));
+  return out;
+}
+
+const POST_LINK = /\/(p|reel|reels|tv|s)\//;
 
 function parseRelations(entries, type) {
   const out = [];
   for (const e of entries) {
-    const list = Array.isArray(e.string_list_data) ? e.string_list_data : [];
-    if (!list.length) {
+    const links = pickLinks(e).filter(d => d.value || d.href);
+    if (!links.length) {
       const name = fixText(e.title || '');
       if (name) out.push({ type, title: name, user: name, href: profileUrl(name), ts: e.timestamp || 0, uris: [] });
       continue;
     }
-    for (const d of list) {
+    for (const d of links) {
       const name = fixText(d.value || e.title || '');
       if (!name && !d.href) continue;
       out.push({ type, title: name || d.href, user: name, href: d.href || profileUrl(name), ts: d.timestamp || 0, uris: [] });
@@ -720,12 +769,13 @@ function parseRelations(entries, type) {
 function parseSaved(entries) {
   const out = [];
   for (const e of entries) {
-    const map = e.string_map_data || {};
-    const first = map['Saved on'] || map['Enregistré le'] || map['Enregistre le'] || Object.values(map)[0] || {};
-    const user = fixText(e.title || '');
-    const href = first.href || profileUrl(user);
+    const links = pickLinks(e);
+    const post = links.find(d => d.href && POST_LINK.test(d.href)) || links.find(d => d.href) || {};
+    const user = fixText(e.title || post.value || '');
+    const href = post.href || profileUrl(user);
+    const ts = post.timestamp || links.map(d => d.timestamp).find(Boolean) || e.timestamp || 0;
     if (!href && !user) continue;
-    out.push({ type: 'saved', title: user || href, user, href, ts: first.timestamp || 0, uris: [] });
+    out.push({ type: 'saved', title: user || href, user, href, ts, uris: [] });
   }
   return out;
 }
@@ -759,11 +809,13 @@ function parseSavedCollections(entries) {
 function parseLiked(entries) {
   const out = [];
   for (const e of entries) {
-    const d = (Array.isArray(e.string_list_data) ? e.string_list_data : [])[0] || {};
-    const user = fixText(e.title || '');
-    const href = d.href || profileUrl(user);
+    const links = pickLinks(e);
+    const post = links.find(d => d.href && POST_LINK.test(d.href)) || links.find(d => d.href) || {};
+    const user = fixText(e.title || post.value || '');
+    const href = post.href || profileUrl(user);
+    const ts = post.timestamp || links.map(d => d.timestamp).find(Boolean) || 0;
     if (!href && !user) continue;
-    out.push({ type: 'liked', title: user || href, user, href, ts: d.timestamp || 0, uris: [] });
+    out.push({ type: 'liked', title: user || href, user, href, ts, uris: [] });
   }
   return out;
 }
@@ -928,8 +980,8 @@ async function zipText(zip, e) { return (await zipBlob(zip, e)).text(); }
 
 /* Journal de lecture : chaque fichier JSON de l'archive y figure, lu ou non.
    C'est ce qui permet de comprendre une catégorie manquante. */
-function reportAdd(list, name, size, kind, count, error) {
-  list.push({ name, size, kind: kind || null, count: count || 0, error: error || null });
+function reportAdd(list, name, size, kind, count, error, shape) {
+  list.push({ name, size, kind: kind || null, count: count || 0, error: error || null, shape: shape || null });
 }
 
 async function importZip(file) {
@@ -960,9 +1012,11 @@ async function importZip(file) {
   for (const e of jsons) {
     status('Lecture : ' + esc(e.name.split('/').pop()) + ' (' + (++done) + '/' + jsons.length + ')');
     try {
-      const got = routeFor(e.name)(JSON.parse(await zipText(zip, e))) || [];
+      const json = JSON.parse(await zipText(zip, e));
+      const got = routeFor(e.name)(json) || [];
       all = all.concat(got);
-      reportAdd(report, e.name, e.usize, got.length ? got[0].type : 'vide', got.length, null);
+      reportAdd(report, e.name, e.usize, got.length ? got[0].type : 'vide', got.length, null,
+        got.length ? null : describeShape(json));
     } catch (err) {
       reportAdd(report, e.name, e.usize, 'erreur', 0, err && err.message);
     }
@@ -1009,7 +1063,8 @@ async function importFiles(fileList) {
     try {
       const got = fn(json) || [];
       all = all.concat(got);
-      reportAdd(report, j.path, j.file.size, got.length ? got[0].type : 'vide', got.length, null);
+      reportAdd(report, j.path, j.file.size, got.length ? got[0].type : 'vide', got.length, null,
+        got.length ? null : describeShape(json));
     } catch (e) {
       reportAdd(report, j.path, j.file.size, 'erreur', 0, e && e.message);
     }
@@ -1737,7 +1792,10 @@ function reportText() {
   const skipped = S.report.filter(r => !r.kind);
   const lines = ['Rapport d\'import — Tri Instagram', ''];
   lines.push('Fichiers lus (' + read.length + ') :');
-  read.forEach(r => lines.push('  ' + r.name + '  →  ' + (TYPE_LABEL[r.kind] || r.kind) + ' : ' + r.count));
+  read.forEach(r => {
+    lines.push('  ' + r.name + '  →  ' + (TYPE_LABEL[r.kind] || r.kind) + ' : ' + r.count);
+    if (r.shape) lines.push('      structure : ' + r.shape);
+  });
   if (errs.length) {
     lines.push('', 'Fichiers en erreur (' + errs.length + ') :');
     errs.forEach(r => lines.push('  ' + r.name + '  →  ' + (r.error || 'erreur')));
@@ -1769,7 +1827,9 @@ function renderReport() {
   const read = S.report.filter(r => r.kind && r.kind !== 'erreur');
   const errs = S.report.filter(r => r.kind === 'erreur');
   const skipped = S.report.filter(r => !r.kind);
-  const row = r => '<tr><td>' + esc(r.name) + '</td><td class="n ' +
+  const row = r => '<tr><td>' + esc(r.name) +
+    (r.shape ? '<div class="rep-no" style="margin-top:3px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px">structure : ' + esc(r.shape) + '</div>' : '') +
+    '</td><td class="n ' +
     (r.kind === 'erreur' ? 'rep-err' : r.count ? 'rep-ok' : 'rep-no') + '">' +
     (r.kind === 'erreur' ? esc(r.error || 'erreur') : (TYPE_LABEL[r.kind] || r.kind) + ' · ' + fmtNum(r.count)) +
     '</td></tr>';
