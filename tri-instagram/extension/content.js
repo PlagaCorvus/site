@@ -1,10 +1,15 @@
 // Tri Instagram — pont entre la page et l'extension.
-// La page ne peut pas parler à l'extension directement : ce script relaie
-// ses demandes et lui renvoie les réponses, uniquement sur la page Tri
-// Instagram, reconnue à sa balise de titre.
+// Actif seulement sur une page dont le titre est « Tri Instagram ». Relaie
+// les demandes d'image de la page vers l'extension, et les réponses en retour.
 
 (function () {
   if (!/Tri Instagram/.test(document.title)) return;
+  const version = chrome.runtime.getManifest().version;
+  function ready() {
+    chrome.runtime.sendMessage({ type: 'tri-ig-status' }, st => {
+      window.postMessage({ triIg: 'ready', version, status: st || null }, '*');
+    });
+  }
   window.addEventListener('message', ev => {
     if (ev.source !== window) return;
     const d = ev.data;
@@ -14,6 +19,6 @@
       window.postMessage(Object.assign({ triIg: 'result', id: d.id, href: d.href }, out), '*');
     });
   });
-  window.postMessage({ triIg: 'ready', version: chrome.runtime.getManifest().version }, '*');
-  document.addEventListener('tri-ig-ping', () => window.postMessage({ triIg: 'ready', version: chrome.runtime.getManifest().version }, '*'));
+  document.addEventListener('tri-ig-ping', ready);
+  ready();
 })();

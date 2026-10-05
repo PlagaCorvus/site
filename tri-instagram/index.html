@@ -400,6 +400,7 @@ ul.plain li{margin-bottom:6px}
     </select>
     <button class="btn" id="btn-selall">☑ Tout sélectionner</button>
     <button class="btn" id="btn-prev" title="Afficher les publications enregistrées via le lecteur Instagram">👁 Aperçus : non</button>
+    <button class="btn hidden" id="btn-ext" title="Images chargées par l'extension avec votre session Instagram, une par carte affichée">🔑 Images par session : non</button>
     <button class="btn primary" id="btn-focus">▶ Mode tri rapide</button>
   </div>
 
@@ -549,7 +550,7 @@ ul.plain li{margin-bottom:6px}
       <li>L'archive contient vos propres photos et vidéos, mais pas celles des publications que vous avez enregistrées : elles appartiennent à d'autres comptes.</li>
       <li>Le bouton <b>Aperçus</b> affiche ces publications via le lecteur public d'Instagram. La page contacte alors instagram.com.</li>
       <li>Désactivé par défaut. Les comptes privés et les publications supprimées ne s'affichent pas.</li>
-      <li>Les publications restreintes par l'âge exigent d'être connecté : connectez-vous à Instagram dans un autre onglet, puis autorisez tous les cookies pour cette page dans les réglages du bouclier de Brave. Sinon, ouvrez-les en onglets depuis la sélection.</li>
+      <li>Les publications restreintes par l'âge ne sont jamais servies par le lecteur public. Pour les voir dans la page, installez l'extension fournie : elle lit chaque publication avec votre session, une par carte affichée, avec un rythme humain, un plafond horaire et une pause automatique si Instagram le demande. Le bouton « Images par session » apparaît alors.</li>
     </ul>
 
     <h4 style="margin:18px 0 8px">Agir ensuite</h4>
@@ -593,7 +594,7 @@ const TYPES = [
 ];
 const TYPE_LABEL = Object.fromEntries(TYPES.map(t => [t.key, t.label]));
 const DEC_LABEL = { keep:'Gardé', remove:'À retirer', later:'Plus tard' };
-const APP_VERSION = '2.6';
+const APP_VERSION = '2.7';
 const LS_DEC = 'tri-ig:decisions';
 const ARCHIVE_EXT = /\.(zip|rar|7z|gz|tgz|tar|bz2|xz)$/i;
 const LS_SNAP = 'tri-ig:snapshot';
@@ -622,6 +623,8 @@ const S = {
   focusIdx: 0,
   hasMedia: false,
   previews: loadFlag('tri-ig:previews'),
+  extMode: loadFlag('tri-ig:ext'),
+  ext: { present: false, version: '', status: null },
 };
 
 function loadFlag(key) {
@@ -1878,6 +1881,95 @@ function embedUrl(it, compact) {
   return 'https://www.instagram.com/p/' + m[1] + (compact ? '/embed/' : '/embed/captioned/');
 }
 
+/* ---------- extension : images par la session de l'utilisateur ----------
+   La page demande une image à la fois au pont de l'extension, seulement
+   pour les cartes affichées. L'extension applique le rythme, le plafond
+   horaire et la pause sur limitation. Les images reçues sont réduites et
+   gardées en base locale : jamais redemandées. */
+const extPending = new Map();
+const extCache = new Map();
+let extSeq = 0;
+const extActive = () => !!(S.extMode && S.ext.present);
+
+function extFetch(href) {
+  return new Promise(resolve => {
+    const id = 'x' + (++extSeq);
+    const timer = setTimeout(() => { extPending.delete(id); resolve({ ok: false, error: 'pas de réponse de l\'extension en 60 s' }); }, 60000);
+    extPending.set(id, { resolve, timer });
+    window.postMessage({ triIg: 'fetch', id, href }, '*');
+  });
+}
+
+async function shrink(dataUrl, max) {
+  try {
+    const img = new Image();
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = dataUrl; });
+    const k = Math.min(1, max / Math.max(img.width, img.height));
+    if (k >= 1) return dataUrl;
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.82);
+  } catch (e) { return dataUrl; }
+}
+
+async function extImage(href) {
+  if (extCache.has(href)) return extCache.get(href);
+  let stored = null;
+  try { stored = await idbGet('tri-ig:img:' + href); } catch (e) {}
+  if (stored && stored.ok) { extCache.set(href, stored); return stored; }
+  const res = await extFetch(href);
+  if (res && res.status) { S.ext.status = res.status; paintExtBtn(); }
+  let out;
+  if (res && res.ok && res.dataUrl) {
+    out = { ok: true, dataUrl: await shrink(res.dataUrl, 640), description: res.description || '', isVideo: !!res.isVideo };
+    idbSet('tri-ig:img:' + href, out).catch(() => {});
+    extCache.set(href, out);
+  } else {
+    out = { ok: false, error: (res && res.error) || 'erreur', limited: !!(res && (res.limited || res.capped)) };
+    if (!out.limited) extCache.set(href, out);
+  }
+  logEvent('extension : ' + (out.ok ? 'image reçue' : 'échec, ' + out.error) + ' pour ' + href.replace(/^https:\/\/www\.instagram\.com/, ''));
+  return out;
+}
+
+window.addEventListener('message', ev => {
+  if (ev.source !== window) return;
+  const d = ev.data;
+  if (!d || !d.triIg) return;
+  if (d.triIg === 'ready') {
+    if (!S.ext.present) logEvent('extension détectée, version ' + (d.version || '?'));
+    S.ext.present = true; S.ext.version = d.version || '';
+    if (d.status) S.ext.status = d.status;
+    paintExtBtn();
+    return;
+  }
+  if (d.triIg === 'result' && extPending.has(d.id)) {
+    const p = extPending.get(d.id);
+    clearTimeout(p.timer); extPending.delete(d.id);
+    p.resolve(d);
+  }
+});
+
+function extStatusText() {
+  const st = S.ext.status;
+  if (!st) return '';
+  if (st.pausedUntil && st.pausedUntil > Date.now()) {
+    const d = new Date(st.pausedUntil);
+    return 'pause jusqu\'à ' + d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+  }
+  return st.count + '/' + st.cap + ' cette heure';
+}
+
+function paintExtBtn() {
+  const b = $('#btn-ext');
+  if (!b) return;
+  b.classList.toggle('hidden', !S.ext.present || EMBEDDED);
+  const st = extStatusText();
+  b.textContent = '🔑 Images par session : ' + (S.extMode ? 'oui' : 'non') + (S.extMode && st ? ' · ' + st : '');
+  b.classList.toggle('on', S.extMode && S.ext.present);
+}
+
 function avatarFor(name, cls) {
   const txt = String(name || '?').replace(/^@/, '');
   const letter = (txt.match(/[\p{L}\p{N}]/u) || ['?'])[0].toUpperCase();
@@ -1934,6 +2026,17 @@ function wallHTML(it) {
   const dec = S.decisions[it.id] || null;
   const sel = S.selection.has(it.id);
   const emb = embedUrl(it, true);
+  if (extActive() && emb) {
+    const name = it.user ? '@' + it.user : (it.collections && it.collections[0]) || 'Publication';
+    const title = '<a href="' + esc(it.href) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">' + esc(name) + ' ↗</a>';
+    return '<div class="wcard' + (dec ? ' d-' + (dec === 'remove' ? 'drop' : dec) : '') + (sel ? ' sel' : '') +
+      '" data-id="' + it.id + '">' +
+      '<div class="wframe xframe" data-ext="' + esc(it.href) + '" style="background:var(--bg-3);height:360px;position:relative">' +
+        '<span class="ph" style="color:var(--txt-2)">En attente…</span></div>' +
+      '<div class="wmeta pick"><span class="t">' + title + '</span>' +
+        '<span class="d">' + (it.ts ? fmtDate(it.ts) : '') + '</span></div>' +
+      decButtons(it, dec, 'wacts') + '</div>';
+  }
   const name = it.user ? '@' + it.user : (it.collections && it.collections[0]) || 'Publication';
   const title = it.href
     ? '<a href="' + esc(it.href) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">' + esc(name) + ' ↗</a>'
@@ -1987,12 +2090,12 @@ function hasThumbs(list) {
 }
 let wallMode = false;
 function itemHTML(it) { return wallMode ? wallHTML(it) : (listMode ? rowHTML(it) : cardHTML(it)); }
-function pageSize() { return wallMode ? PAGE_WALL : PAGE; }
+function pageSize() { return wallMode ? (extActive() ? 24 : PAGE_WALL) : PAGE; }
 
 function renderGrid() {
   currentList = visibleItems();
   listMode = !hasThumbs(currentList);
-  wallMode = S.previews && listMode && currentList.some(it => embedUrl(it));
+  wallMode = (S.previews || extActive()) && listMode && currentList.some(it => embedUrl(it));
   S.page = 1;
   const grid = $('#grid');
   grid.classList.toggle('list', listMode && !wallMode);
@@ -2005,7 +2108,11 @@ function renderGrid() {
     renderSelBar();
     return;
   }
-  const banner = wallMode
+  const banner = wallMode && extActive()
+    ? '<div class="wnote"><span>Images chargées par l\'extension avec votre session Instagram, une à la fois, seulement pour les cartes ' +
+      'affichées, et gardées sur cet ordinateur. Rythme d\'une à deux secondes, au plus 200 par heure, pause automatique si Instagram le demande. ' +
+      'Une carte en échec affiche la raison ; son nom reste cliquable.</span></div>'
+    : wallMode
     ? '<div class="wnote"><span>Aperçus chargés depuis instagram.com, uniquement pour les cartes proches de l\'écran, ' +
       'et libérés dès qu\'elles s\'en éloignent. Un cadre vide, ou qui demande de se connecter, signale une publication privée, ' +
       'supprimée ou restreinte : cliquez le nom du compte pour l\'ouvrir dans un onglet où vous êtes connecté, ' +
@@ -2078,7 +2185,40 @@ function loadFrame(el) {
   el.appendChild(f);
 }
 
+/* Images par session : seulement les cartes réellement à l'écran, avec
+   une marge courte pour ne pas anticiper au-delà de ce que l'utilisateur voit. */
+const extObserver = new IntersectionObserver(entries => {
+  for (const en of entries) {
+    if (!en.isIntersecting) continue;
+    extObserver.unobserve(en.target);
+    loadExt(en.target);
+  }
+}, { rootMargin: '120px 0px' });
+
+async function loadExt(el) {
+  const href = el.dataset.ext;
+  if (!href || el.dataset.loaded) return;
+  el.dataset.loaded = '1';
+  el.innerHTML = '<span class="ph" style="color:var(--txt-2)">Chargement…</span>';
+  const r = await extImage(href);
+  if (!el.isConnected) return;
+  if (r.ok) {
+    el.innerHTML = '<img src="' + r.dataUrl + '" alt="" style="width:100%;height:100%;object-fit:cover;display:block">' +
+      (r.isVideo ? '<span class="tag" style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,.7);border-radius:6px;padding:2px 7px;font-size:11px;font-weight:700">vidéo</span>' : '');
+    el.style.background = '#000';
+  } else {
+    el.innerHTML = '<span class="ph" style="color:var(--drop)">' + esc(r.error) +
+      '<br><span style="color:var(--txt-2)">' + (r.limited ? 'Réessayez plus tard, ou ouvrez-la par son nom.' : 'Ouvrez la publication par son nom ci-dessous.') + '</span></span>';
+    if (r.limited) { delete el.dataset.loaded; }
+  }
+}
+
 function hydrate(root) {
+  $$('.xframe[data-ext]', root).forEach(el => {
+    if (el.dataset.obs) return;
+    el.dataset.obs = '1';
+    extObserver.observe(el);
+  });
   $$('.thumb[data-uri]:not([data-uri=""])', root).forEach(el => {
     if (el.dataset.obs) return;
     el.dataset.obs = '1';
@@ -2159,7 +2299,7 @@ async function paintFocus() {
   $('#focus-count').textContent = fmtNum(S.focusIdx + 1) + ' / ' + fmtNum(S.focusList.length);
   $('#focus-title').textContent = it.user ? '@' + it.user : (it.title || '(sans titre)');
   const ownMedia = !!(it.uris && it.uris[0] && S.media && S.media.has(it.uris[0]));
-  $('#focus-title').classList.toggle('hidden', !ownMedia && !(S.previews && embedUrl(it)));
+  $('#focus-title').classList.toggle('hidden', !ownMedia && !((S.previews || extActive()) && embedUrl(it)));
   const bits = [];
   bits.push(TYPE_LABEL[it.type] || it.type);
   if (it.ts) bits.push(fmtDate(it.ts));
@@ -2188,6 +2328,19 @@ async function paintFocus() {
     return;
   }
   const emb = embedUrl(it);
+  if (extActive() && emb) {
+    box.className = 'focus-media';
+    box.innerHTML = '<span class="ph">◌</span>';
+    const r = await extImage(it.href);
+    if (S.focusList[S.focusIdx] !== it) return;
+    box.innerHTML = r.ok
+      ? '<img src="' + r.dataUrl + '" alt="">'
+      : '<div class="ident-box"><div class="idname">' + esc(it.user ? '@' + it.user : 'Publication') + '</div>' +
+        '<div class="idsub" style="color:var(--drop)">' + esc(r.error) + '</div>' +
+        '<div class="idsub">Touche O pour l\'ouvrir dans un onglet.</div></div>';
+    if (r.ok && r.description) $('#focus-meta').textContent = r.description.slice(0, 160);
+    return;
+  }
   if (S.previews && emb) {
     box.className = 'focus-media embed';
     box.innerHTML = '<iframe src="' + esc(emb) + '" loading="lazy" title="Publication Instagram" ' +
@@ -2578,6 +2731,15 @@ function setPreviews(on) {
   renderGrid();
   if (focusOpen()) paintFocus();
 }
+$('#btn-ext').addEventListener('click', () => {
+  S.extMode = !S.extMode;
+  saveFlag('tri-ig:ext', S.extMode);
+  logEvent('images par session : ' + (S.extMode ? 'activées' : 'désactivées'));
+  paintExtBtn();
+  renderGrid();
+  if (focusOpen()) paintFocus();
+  toast(S.extMode ? 'Images chargées par votre session' : 'Images par session désactivées');
+});
 $('#btn-prev').addEventListener('click', () => {
   if (S.previews) { setPreviews(false); toast('Aperçus désactivés'); return; }
   $('#dlg-prev').showModal();
@@ -2825,6 +2987,7 @@ setTimeout(() => { try { mergeDecisionsFromIdb(); } catch (e) {} }, 60);
 paintPrevBtn();
 setTimeout(() => { try { renderResume(); } catch (e) {} }, 80);
 setTimeout(() => { try { listServedArchives(); } catch (e) {} }, 100);
+setTimeout(() => { try { document.dispatchEvent(new Event('tri-ig-ping')); paintExtBtn(); } catch (e) {} }, 300);
 window.addEventListener('beforeunload', () => { try { localStorage.setItem(LS_DEC, JSON.stringify(S.decisions)); } catch (e) {} });
 </script>
 </body>
