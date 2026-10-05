@@ -549,6 +549,7 @@ ul.plain li{margin-bottom:6px}
       <li>L'archive contient vos propres photos et vidéos, mais pas celles des publications que vous avez enregistrées : elles appartiennent à d'autres comptes.</li>
       <li>Le bouton <b>Aperçus</b> affiche ces publications via le lecteur public d'Instagram. La page contacte alors instagram.com.</li>
       <li>Désactivé par défaut. Les comptes privés et les publications supprimées ne s'affichent pas.</li>
+      <li>Les publications restreintes par l'âge exigent d'être connecté : connectez-vous à Instagram dans un autre onglet, puis autorisez tous les cookies pour cette page dans les réglages du bouclier de Brave. Sinon, ouvrez-les en onglets depuis la sélection.</li>
     </ul>
 
     <h4 style="margin:18px 0 8px">Agir ensuite</h4>
@@ -592,7 +593,7 @@ const TYPES = [
 ];
 const TYPE_LABEL = Object.fromEntries(TYPES.map(t => [t.key, t.label]));
 const DEC_LABEL = { keep:'Gardé', remove:'À retirer', later:'Plus tard' };
-const APP_VERSION = '2.5';
+const APP_VERSION = '2.6';
 const LS_DEC = 'tri-ig:decisions';
 const ARCHIVE_EXT = /\.(zip|rar|7z|gz|tgz|tar|bz2|xz)$/i;
 const LS_SNAP = 'tri-ig:snapshot';
@@ -2006,8 +2007,9 @@ function renderGrid() {
   }
   const banner = wallMode
     ? '<div class="wnote"><span>Aperçus chargés depuis instagram.com, uniquement pour les cartes proches de l\'écran, ' +
-      'et libérés dès qu\'elles s\'en éloignent. Un cadre resté vide signale une publication privée ou supprimée : ' +
-      'le lien du compte reste cliquable.</span></div>'
+      'et libérés dès qu\'elles s\'en éloignent. Un cadre vide, ou qui demande de se connecter, signale une publication privée, ' +
+      'supprimée ou restreinte : cliquez le nom du compte pour l\'ouvrir dans un onglet où vous êtes connecté, ' +
+      'ou sélectionnez plusieurs cartes et utilisez « Ouvrir en onglets ».</span></div>'
     : '';
   grid.innerHTML = banner + currentList.slice(0, pageSize()).map(itemHTML).join('') + sentinel();
   hydrate(grid);
@@ -2119,6 +2121,7 @@ function renderSelBar() {
     '<button class="btn sm" data-bulk="keep">✓ Garder</button>' +
     '<button class="btn sm" data-bulk="remove">✕ Retirer</button>' +
     '<button class="btn sm" data-bulk="later">★ Plus tard</button>' +
+    '<button class="btn sm" data-bulk="open" title="Ouvre jusqu\'à 10 publications dans des onglets, où vous êtes connecté">↗ Ouvrir en onglets</button>' +
     '<button class="btn sm ghost" data-bulk="none">Désélectionner</button>';
   document.body.appendChild(el);
 }
@@ -2522,6 +2525,21 @@ document.body.addEventListener('click', e => {
   if (!b) return;
   const act = b.dataset.bulk;
   if (act === 'none') { S.selection.clear(); renderGrid(); return; }
+  if (act === 'open') {
+    const items = Array.from(S.selection).map(id => S.byId && S.byId.get(id)).filter(i => i && i.href).slice(0, 10);
+    let opened = 0;
+    for (const it of items) {
+      const w = window.open(it.href, '_blank', 'noopener');
+      if (w) opened++;
+    }
+    logEvent('ouverture en onglets : ' + opened + '/' + items.length);
+    if (opened < items.length) {
+      toast(opened + ' onglet(s) ouvert(s) sur ' + items.length + '. Autorisez les fenêtres surgissantes pour ce site dans Brave, puis réessayez.');
+    } else {
+      toast(opened + ' onglet(s) ouvert(s)');
+    }
+    return;
+  }
   const ids = Array.from(S.selection);
   const batch = [];
   for (const id of ids) {
